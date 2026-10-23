@@ -33,6 +33,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
@@ -82,6 +83,9 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private static final int PATH_RECHECK_TICKS = 10;
     private static final int PATH_RETRY_TICKS = 20;
     private static final int LIFE_SYNC_INTERVAL = 5;
+    /** Сколько последних позиций помнит клиент для ленты радужного следа (≈ 1 секунда). */
+    private static final int TRAIL_LENGTH = 20;
+    private static final Vector3f MARKER_COLOR = new Vector3f(1.0F, 0.2F, 0.25F);
     private static final Vec3d[] ESCAPE_DIRECTIONS = createEscapeDirections();
 
     private static final TrackedData<Optional<UUID>> OWNER_UUID =
@@ -92,6 +96,11 @@ public class OlegusArrowEntity extends ProjectileEntity {
             DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.BYTE);
     private static final TrackedData<Float> BOOST =
             DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.FLOAT);
+    /** Текущая цель — клиент рисует над ней вращающийся маркер. */
+    private static final TrackedData<Integer> TARGET_ID =
+            DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
+    private static final TrackedData<Integer> KILLS =
+            DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
 
     private enum Phase { ACTIVE, RETURNING, FINALE }
 
@@ -131,13 +140,14 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private int stuckSeconds;
     private int phasingTicks;
 
-    @Nullable
-    private Vec3d lastTrailPos;
-    private double trailDistance;
+    /** Позиции стрелы за последние тики, от новой к старой; заполняется только на клиенте. */
+    private final List<Vec3d> trailHistory = new ArrayList<>();
 
     public OlegusArrowEntity(EntityType<? extends OlegusArrowEntity> type, World world) {
         super(type, world);
         this.setNoGravity(true);
+        // Длинный след должен рисоваться, даже когда сама стрела вне экрана.
+        this.ignoreCameraFrustum = true;
     }
 
     /** Выпускает стрелу из глаз игрока по направлению взгляда. */
@@ -158,6 +168,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         }
         world.spawnEntity(arrow);
         world.playSound(null, center.x, center.y, center.z, ModSounds.LAUNCH, SoundCategory.PLAYERS, 1.0F, 1.0F);
+        rainbowBurst(world, center, 5, 0.15);
         return arrow;
     }
 
@@ -173,6 +184,8 @@ public class OlegusArrowEntity extends ProjectileEntity {
         builder.add(LIFE, 0);
         builder.add(STATUS, STATUS_WAITING);
         builder.add(BOOST, 1.0F);
+        builder.add(TARGET_ID, -1);
+        builder.add(KILLS, 0);
     }
 
     // ---------------------------------------------------------------- состояние для клиента и команд
@@ -197,6 +210,16 @@ public class OlegusArrowEntity extends ProjectileEntity {
     /** Текущее ускорение в толпе: от 1 до 2. */
     public float getBoost() {
         return this.dataTracker.get(BOOST);
+    }
+
+    /** Сколько мобов стрела победила за этот полёт. */
+    public int getKills() {
+        return this.dataTracker.get(KILLS);
+    }
+
+    /** Недавние позиции для отрисовки следа, от новой к старой. */
+    public List<Vec3d> getTrailHistory() {
+        return this.trailHistory;
     }
 
     public ArrowMode getMode() {
@@ -254,6 +277,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         if (effects) {
             owner.getWorld().playSound(null, owner.getX(), owner.getY(), owner.getZ(), SoundEvents.ENTITY_ITEM_PICKUP,
                     SoundCategory.PLAYERS, 0.6F, 1.4F);
+            owner.sendMessage(Text.translatable("message.olegus_arrow.returned", this.getKills()), true);
         }
         this.discard();
     }
@@ -264,7 +288,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     public void tick() {
         super.tick();
         if (this.getWorld().isClient) {
-            this.spawnTrail();
+            this.clientTick();
         } else {
             this.serverTick((ServerWorld) this.getWorld());
         }
@@ -273,7 +297,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private void serverTick(ServerWorld world) {
         ServerPlayerEntity owner = this.resolveOwner(world);
         if (owner == null || !owner.isAlive()) {
-            this.dropAsItem(world);
+            this.dropAsItem(world, null);
             return;
         }
         if (owner.getWorld() != world || this.squaredDistanceTo(owner) > OWNER_LEASH * OWNER_LEASH) {
@@ -378,7 +402,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
             this.circleTicks++;
         }
         if (this.circleTicks >= FINALE_CIRCLE_TICKS || this.finaleTicks >= FINALE_TIMEOUT_TICKS) {
-            this.dropAsItem(world);
+            this.dropAsItem(world, owner);
             return null;
         }
         return new Plan(this.orbitPoint(world, owner, FINALE_ORBIT_RADIUS), FINALE_SPEED, 35.0F, null, false);
@@ -410,7 +434,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     }
 
     /** Время вышло или владелец пропал: стрела падает предметом, который можно подобрать. */
-    private void dropAsItem(ServerWorld world) {
+    private void dropAsItem(ServerWorld world, @Nullable ServerPlayerEntity owner) {
         if (this.isRemoved()) {
             return;
         }
@@ -423,9 +447,26 @@ public class OlegusArrowEntity extends ProjectileEntity {
             world.spawnEntity(item);
         }
         world.spawnParticles(ParticleTypes.END_ROD, center.x, center.y, center.z, 16, 0.2, 0.2, 0.2, 0.04);
+        rainbowBurst(world, center, 4, 0.25);
         world.playSound(null, center.x, center.y, center.z, SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
                 SoundCategory.PLAYERS, 1.0F, 1.2F);
+        if (owner != null) {
+            owner.sendMessage(Text.translatable("message.olegus_arrow.landed", this.getKills()), true);
+        }
         this.discard();
+    }
+
+    /** Облачко разноцветных искр: при запуске, ударе и падении. */
+    private static void rainbowBurst(ServerWorld world, Vec3d at, int perColor, double spread) {
+        float start = world.getRandom().nextFloat();
+        for (int i = 0; i < 4; i++) {
+            DustParticleEffect dust = new DustParticleEffect(toColor(Rainbow.hsvToRgb(start + i * 0.25F, 0.85F, 1.0F)), 1.2F);
+            world.spawnParticles(dust, at.x, at.y, at.z, perColor, spread, spread, spread, 0.0);
+        }
+    }
+
+    private static Vector3f toColor(int rgb) {
+        return new Vector3f(((rgb >> 16) & 0xFF) / 255.0F, ((rgb >> 8) & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F);
     }
 
     // ---------------------------------------------------------------- цели
@@ -517,13 +558,23 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.hitCooldown = HIT_COOLDOWN;
         // Урон постоянный и не зависит от скорости — в том числе от ускорения в толпе.
         DamageSource source = ModDamageTypes.arrow(world, this, owner);
-        if (target.damage(source, DAMAGE)) {
+        boolean damaged = target.damage(source, DAMAGE);
+        Vec3d center = target.getBoundingBox().getCenter();
+        if (damaged) {
             world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), SoundEvents.ENTITY_ARROW_HIT,
                     SoundCategory.PLAYERS, 1.0F, 1.1F + this.random.nextFloat() * 0.3F);
-            Vec3d center = target.getBoundingBox().getCenter();
             world.spawnParticles(ParticleTypes.CRIT, center.x, center.y, center.z, 12, 0.25, 0.25, 0.25, 0.4);
+            rainbowBurst(world, to, 2, 0.1);
         }
         if (!target.isAlive()) {
+            if (damaged) {
+                this.dataTracker.set(KILLS, this.getKills() + 1);
+                world.spawnParticles(ParticleTypes.FIREWORK, center.x, center.y, center.z, 14, 0.2, 0.2, 0.2, 0.12);
+                rainbowBurst(world, center, 6, 0.35);
+                // Звонкое «дзынь», как при попадании из лука, — сигнал владельцу о победе.
+                world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), SoundEvents.ENTITY_ARROW_HIT_PLAYER,
+                        SoundCategory.PLAYERS, 0.5F, 1.0F);
+            }
             this.clearTarget();
             this.rescanCooldown = 0;
         }
@@ -680,6 +731,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         };
         this.dataTracker.set(STATUS, status);
         this.dataTracker.set(BOOST, Math.round(this.speedMultiplier * 20.0) / 20.0F);
+        this.dataTracker.set(TARGET_ID, this.cachedTarget != null ? this.cachedTarget.getId() : -1);
     }
 
     /** Поворачивает единичный вектор {@code from} к {@code to} не больше чем на {@code maxAngle} радиан. */
@@ -711,38 +763,61 @@ public class OlegusArrowEntity extends ProjectileEntity {
         return directions.toArray(new Vec3d[0]);
     }
 
-    // ---------------------------------------------------------------- радужный след (клиент)
+    // ---------------------------------------------------------------- клиент: след и маркер цели
 
-    private void spawnTrail() {
-        Vec3d current = this.getBoundingBox().getCenter();
-        Vec3d last = this.lastTrailPos;
-        this.lastTrailPos = current;
-        if (last == null) {
-            return;
-        }
-        Vec3d delta = current.subtract(last);
-        double length = delta.length();
-        if (length < 1.0E-3 || length > 12.0) {
-            return;
-        }
+    /**
+     * Сам радужный след — лента, которую рисует рендерер по {@link #trailHistory}. Здесь же
+     * сыплются блёстки, которые ещё немного висят в воздухе позади ленты.
+     */
+    private void clientTick() {
         World world = this.getWorld();
-        float scale = 1.1F + 0.3F * (this.getBoost() - 1.0F);
-        int steps = MathHelper.clamp(MathHelper.ceil(length / 0.12), 1, 32);
-        for (int i = 1; i <= steps; i++) {
-            double t = i / (double) steps;
-            Vec3d point = last.add(delta.multiply(t));
-            // Оттенок меняется и вдоль следа, и со временем — след переливается.
-            float hue = (float) ((this.trailDistance + length * t) * 0.045 + this.age * 0.012);
-            int rgb = Rainbow.hsvToRgb(hue, 0.9F, 1.0F);
-            Vector3f color = new Vector3f(((rgb >> 16) & 0xFF) / 255.0F, ((rgb >> 8) & 0xFF) / 255.0F,
-                    (rgb & 0xFF) / 255.0F);
-            world.addImportantParticle(new DustParticleEffect(color, scale), point.x, point.y, point.z, 0.0, 0.0, 0.0);
+        Vec3d current = this.getBoundingBox().getCenter();
+        Vec3d last = this.trailHistory.isEmpty() ? null : this.trailHistory.get(0);
+        if (last != null && last.squaredDistanceTo(current) > 12.0 * 12.0) {
+            // Стрелу перенесло рывком — старый след к ней больше не тянем.
+            this.trailHistory.clear();
+            last = null;
         }
-        this.trailDistance += length;
-        if (this.random.nextInt(3) == 0) {
+        this.trailHistory.add(0, current);
+        if (this.trailHistory.size() > TRAIL_LENGTH) {
+            this.trailHistory.remove(this.trailHistory.size() - 1);
+        }
+
+        if (last != null && last.squaredDistanceTo(current) > 1.0E-4) {
+            Vec3d delta = current.subtract(last);
+            for (int i = 0; i < 2; i++) {
+                Vec3d point = last.add(delta.multiply(this.random.nextDouble()));
+                Vector3f color = toColor(Rainbow.hsvToRgb(this.random.nextFloat(), 0.75F, 1.0F));
+                world.addParticle(new DustParticleEffect(color, 0.7F),
+                        point.x + this.random.nextGaussian() * 0.08, point.y + this.random.nextGaussian() * 0.08,
+                        point.z + this.random.nextGaussian() * 0.08, 0.0, 0.0, 0.0);
+            }
+        }
+        if (this.random.nextInt(4) == 0) {
             world.addParticle(ParticleTypes.END_ROD, current.x, current.y, current.z,
                     this.random.nextGaussian() * 0.01, this.random.nextGaussian() * 0.01,
                     this.random.nextGaussian() * 0.01);
+        }
+        this.spawnTargetMarker(world);
+    }
+
+    /** Над текущей целью кружатся две красные искры — видно, кого стрела сейчас преследует. */
+    private void spawnTargetMarker(World world) {
+        int targetId = this.dataTracker.get(TARGET_ID);
+        if (targetId < 0 || this.age % 2 != 0) {
+            return;
+        }
+        Entity target = world.getEntityById(targetId);
+        if (target == null) {
+            return;
+        }
+        double radius = Math.max(0.35, target.getWidth() * 0.6);
+        double y = target.getY() + target.getHeight() + 0.35;
+        for (int i = 0; i < 2; i++) {
+            double angle = this.age * 0.35 + i * Math.PI;
+            world.addParticle(new DustParticleEffect(MARKER_COLOR, 0.8F),
+                    target.getX() + Math.cos(angle) * radius, y, target.getZ() + Math.sin(angle) * radius,
+                    0.0, 0.0, 0.0);
         }
     }
 
@@ -774,11 +849,6 @@ public class OlegusArrowEntity extends ProjectileEntity {
         return true;
     }
 
-    @Override
-    public boolean canUsePortals(boolean allowVehicles) {
-        return false;
-    }
-
     // ---------------------------------------------------------------- сохранение
 
     @Override
@@ -790,6 +860,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         nbt.putInt("Life", this.life);
         nbt.putInt("FinaleTicks", this.finaleTicks);
         nbt.putInt("CircleTicks", this.circleTicks);
+        nbt.putInt("Kills", this.getKills());
         if (this.targetUuid != null) {
             nbt.putUuid("Target", this.targetUuid);
         }
@@ -809,6 +880,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.dataTracker.set(LIFE, this.life);
         this.finaleTicks = nbt.getInt("FinaleTicks");
         this.circleTicks = nbt.getInt("CircleTicks");
+        this.dataTracker.set(KILLS, nbt.getInt("Kills"));
         this.targetUuid = nbt.containsUuid("Target") ? nbt.getUuid("Target") : null;
         this.stack = nbt.contains("Item", NbtElement.COMPOUND_TYPE)
                 ? ItemStack.fromNbt(this.getRegistryManager(), nbt.getCompound("Item")).orElse(ItemStack.EMPTY)

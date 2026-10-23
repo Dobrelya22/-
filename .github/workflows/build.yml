@@ -21,10 +21,11 @@ jobs:
       - name: Сборка
         run: ./gradlew build --stacktrace
 
-      - name: Игровые тесты
-        run: ./gradlew runGametest --stacktrace
-
+      # Готовый мод выкладывается до тестов, чтобы его можно было скачать в любом случае.
       - uses: actions/upload-artifact@v4
         with:
           name: olegus-arrow
-          path: build/libs/*.jar
+          path: build/libs/olegus-arrow-*.jar
+
+      - name: Игровые тесты
+        run: ./gradlew runGametest --stacktrace

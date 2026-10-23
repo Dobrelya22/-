@@ -1,5 +1,6 @@
 package com.olegus.arrow.client;
 
+import com.olegus.arrow.ArrowMode;
 import com.olegus.arrow.network.ArrowCommand;
 import com.olegus.arrow.network.ArrowCommandPayload;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -37,8 +38,11 @@ public final class ArrowKeyBindings {
         while (TOGGLE_MODE.wasPressed()) {
             if (send(client, ArrowCommand.TOGGLE_MODE)) {
                 // Сразу показываем новый режим; сервер подтвердит его своим пакетом.
-                ClientArrowState.setMode(ClientArrowState.mode().next());
+                ArrowMode mode = ClientArrowState.mode().next();
+                ClientArrowState.setMode(mode);
                 client.getSoundManager().play(PositionedSoundInstance.master(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 1.6F));
+                client.player.sendMessage(Text.translatable("message.olegus_arrow.mode_set",
+                        Text.translatable(mode.translationKey())), true);
             }
         }
         while (DESIGNATE.wasPressed()) {

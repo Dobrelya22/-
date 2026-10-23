@@ -9,6 +9,14 @@ base {
     archivesName = project.archives_base_name
 }
 
+// Игровые тесты живут отдельно и в jar мода не попадают; ./gradlew build их не компилирует.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+}
+
 loom {
     splitEnvironmentSourceSets()
 
@@ -17,6 +25,9 @@ loom {
             sourceSet sourceSets.main
             sourceSet sourceSets.client
         }
+        'olegus_arrow_gametest' {
+            sourceSet sourceSets.gametest
+        }
     }
 
     runs {
@@ -24,6 +35,7 @@ loom {
         gametest {
             server()
             name 'Game Test'
+            source sourceSets.gametest
             vmArg '-Dfabric-api.gametest'
             vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get().asFile}/gametest/report.xml"
             runDir 'build/gametest'

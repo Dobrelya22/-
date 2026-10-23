@@ -13,6 +13,8 @@ public final class ModSounds {
     public static final SoundEvent RESPOND = register("respond");
     /** Взлёт стрелы. */
     public static final SoundEvent LAUNCH = register("launch");
+    /** Свист рассекаемого воздуха, который тянется за стрелой в полёте (зацикленный). */
+    public static final SoundEvent FLIGHT = register("flight");
 
     private ModSounds() {
     }

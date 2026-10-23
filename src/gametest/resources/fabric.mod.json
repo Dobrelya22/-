@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "olegus_arrow_gametest",
+  "version": "1.0.0",
+  "name": "Olegus Arrow — game tests",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": ["com.olegus.arrow.gametest.OlegusArrowGameTests"]
+  },
+  "depends": {
+    "olegus_arrow": "*",
+    "fabric-gametest-api-v1": "*"
+  }
+}

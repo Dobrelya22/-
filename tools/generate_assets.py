@@ -19,110 +19,143 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "src/main/resources/assets/olegus_arrow"
 
-OUTLINE = (58, 6, 12, 255)
-DARK = (122, 14, 22, 255)
-RED = (205, 32, 38, 255)
-BRIGHT = (255, 92, 78, 255)
-TIP = (255, 214, 196, 255)
+OUTLINE = (46, 4, 12, 255)
+DARK = (128, 14, 28, 255)
+RED = (212, 34, 46, 255)
+LIGHT = (255, 108, 96, 255)
+HOT = (255, 232, 220, 255)
 
 
 # ------------------------------------------------------------------ текстуры
 
+def diagonal(s: int, u: int) -> tuple:
+    """Пиксель спрайта по координатам вдоль стрелы (s, к острию) и поперёк неё (u, минус — вверх-влево)."""
+    return (s + u + 15) // 2, (u + 15 - s) // 2
+
+
 def item_texture() -> Image.Image:
-    """Иконка 16×16: красная стрела Яка по диагонали, остриё вправо-вверх."""
+    """Иконка 16×16: тонкая красная стрела Яка, остриё вправо-вверх, светлый наконечник и оперение."""
     img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
     px = img.load()
-    # Древко: светлая диагональ и тёмная нижняя грань.
-    for x in range(2, 12):
-        px[x, 15 - x] = RED
-    for x in range(3, 11):
-        px[x + 1, 15 - x] = DARK
-    # Наконечник — треугольник с прямым углом в острие (14, 1).
-    for x in range(10, 15):
-        for y in range(1, 6):
-            if (14 - x) + (y - 1) <= 4:
-                edge = y == 1 or x == 14
-                px[x, y] = BRIGHT if edge else RED
-    px[14, 1] = TIP
-    # Оперение, симметричное относительно древка, и хвостовик.
-    for x, y in [(1, 11), (2, 11), (1, 10), (4, 14), (4, 13), (5, 14)]:
-        px[x, y] = DARK
-    px[1, 14] = DARK
-    # Контур вокруг всего непрозрачного.
-    filled = {(x, y) for x in range(16) for y in range(16) if px[x, y][3] > 0}
+    for s in range(-11, 6, 2):
+        px[diagonal(s, 0)] = RED
+    for s in (-1, 1):
+        px[diagonal(s, 0)] = LIGHT
+    # Вытянутый наконечник: светлый верхний край, тёмный нижний, раскалённое остриё.
+    for s, color in {7: RED, 9: LIGHT, 11: LIGHT, 13: HOT}.items():
+        px[diagonal(s, 0)] = color
+    for s, (upper, lower) in {6: (LIGHT, DARK), 8: (LIGHT, RED), 10: (LIGHT, RED)}.items():
+        px[diagonal(s, -1)] = upper
+        px[diagonal(s, 1)] = lower
+    # Оперение: по штриху в каждую сторону, отогнутому назад, и хвостовик.
+    for s, u, color in [(-6, 1, LIGHT), (-7, 2, RED), (-8, 3, RED), (-9, 4, DARK)]:
+        px[diagonal(s, -u)] = color
+        px[diagonal(s, u)] = color
+    px[diagonal(-13, 0)] = DARK
+    add_outline(px, 16)
+    return img
+
+
+def add_outline(px, size: int) -> None:
+    filled = {(x, y) for x in range(size) for y in range(size) if px[x, y][3] > 0}
     for x, y in filled:
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nx, ny = x + dx, y + dy
-            if 0 <= nx < 16 and 0 <= ny < 16 and (nx, ny) not in filled:
+            if 0 <= nx < size and 0 <= ny < size and (nx, ny) not in filled:
                 px[nx, ny] = OUTLINE
+
+
+def model_texture() -> Image.Image:
+    """Текстура 64×32 для объёмной модели: каждой детали — своя область однотонного цвета.
+
+    Области совпадают с uv(...) в OlegusArrowRenderer.getTexturedModelData().
+    """
+    img = Image.new("RGBA", (64, 32), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    regions = [
+        ((0, 0, 26, 13), RED),                  # древко
+        ((12, 0, 13, 12), (238, 64, 66, 255)),  # верхняя грань древка светлее
+        ((0, 14, 8, 18), (255, 90, 78, 255)),   # основание наконечника
+        ((8, 14, 15, 18), (255, 122, 102, 255)),
+        ((16, 14, 22, 17), (255, 168, 146, 255)),
+        ((24, 14, 28, 16), HOT),                # остриё
+        ((28, 0, 34, 6), (196, 28, 42, 255)),   # оперение сзади
+        ((36, 0, 47, 3), (196, 28, 42, 255)),
+        ((28, 8, 33, 12), (226, 52, 60, 255)),  # оперение ближе к середине
+        ((36, 5, 44, 8), (226, 52, 60, 255)),
+        ((50, 0, 54, 2), (255, 122, 102, 255)),  # хвостовик
+    ]
+    for (x0, y0, x1, y1), color in regions:
+        draw.rectangle((x0, y0, x1 - 1, y1 - 1), fill=color)
     return img
 
 
-def entity_texture() -> Image.Image:
-    """Развёртка 32×32 как у ванильной стрелы: сбоку 16×5 сверху, торец 5×5 под ним."""
-    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
-    px = img.load()
-    # Вид сбоку: x=0 — хвост, x=15 — остриё; ось древка — строка 2.
-    for x in range(1, 12):
-        px[x, 2] = RED
-    for x, y in [(0, 0), (1, 0), (1, 1), (2, 1), (0, 4), (1, 4), (1, 3), (2, 3)]:
-        px[x, y] = DARK
-    px[0, 2] = OUTLINE
-    for x, y in [(11, 1), (11, 3)]:
-        px[x, y] = DARK
-    for x in (12, 13):
-        for y in (1, 2, 3):
-            px[x, y] = BRIGHT
-    px[14, 2] = BRIGHT
-    px[15, 2] = TIP
-    # Торец — крестик оперения.
-    for i in range(5):
-        px[2, 5 + i] = DARK
-        px[i, 7] = DARK
-    px[2, 7] = OUTLINE
-    return img
+def glow_texture() -> Image.Image:
+    """Мягкий светящийся диск с лучиками-бликами. Слой свечения складывает цвета: чёрное — прозрачно."""
+    size = 32
+    c = (size - 1) / 2
+    y, x = np.mgrid[0:size, 0:size]
+    dx, dy = (x - c) / c, (y - c) / c
+    r = np.sqrt(dx * dx + dy * dy)
+    glow = np.exp(-(r / 0.42) ** 2 * 2.2)
+    rays = (np.exp(-np.abs(dx) * 3.0) * np.exp(-(dy * 14) ** 2) + np.exp(-np.abs(dy) * 3.0) * np.exp(-(dx * 14) ** 2))
+    value = np.clip(glow + 0.45 * rays, 0, 1) * np.clip(1.2 - r, 0, 1)
+    return grayscale_rgba(value)
+
+
+def trail_texture() -> Image.Image:
+    """Поперечный профиль ленты следа: яркая сердцевина и мягкие края."""
+    size = 16
+    v = (np.arange(size) + 0.5) / size - 0.5
+    profile = np.clip(np.exp(-(v / 0.24) ** 2) * 0.75 + np.exp(-(v / 0.08) ** 2) * 0.5, 0, 1)
+    return grayscale_rgba(np.tile(profile[:, None], (1, size)))
+
+
+def grayscale_rgba(value: np.ndarray) -> Image.Image:
+    level = (value * 255).astype(np.uint8)
+    rgba = np.stack([level, level, level, np.full_like(level, 255)], axis=-1)
+    return Image.fromarray(rgba, "RGBA")
 
 
 def mod_icon() -> Image.Image:
-    """Иконка мода 128×128: космический фон, радужный след и стрела."""
+    """Иконка мода 128×128: ночное небо, светящаяся стрела и радужный хвост за ней."""
     size = 128
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    background = Image.new("RGBA", (size, size))
-    bg = background.load()
-    for y in range(size):
-        for x in range(size):
-            t = (x + y) / (2 * size)
-            bg[x, y] = (int(22 + 30 * t), int(10 + 8 * t), int(48 + 40 * t), 255)
+    y, x = np.mgrid[0:size, 0:size]
+    r = np.sqrt((x - 80) ** 2 + (y - 44) ** 2) / size
+    sky = np.stack([28 + 40 * np.exp(-r * 4), 10 + 12 * np.exp(-r * 5), 46 + 50 * np.exp(-r * 3),
+                    np.full_like(r, 255)], axis=-1).clip(0, 255).astype(np.uint8)
+    background = Image.fromarray(sky, "RGBA")
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=22, fill=255)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     img.paste(background, (0, 0), mask)
 
     rng = np.random.default_rng(7)
     draw = ImageDraw.Draw(img)
-    for _ in range(26):
-        x, y = rng.integers(8, size - 8, size=2)
-        a = int(rng.integers(90, 220))
-        draw.point((int(x), int(y)), fill=(255, 255, 255, a))
+    for _ in range(30):
+        sx, sy = rng.integers(8, size - 8, size=2)
+        draw.point((int(sx), int(sy)), fill=(255, 255, 255, int(rng.integers(80, 220))))
 
-    # Радужный след — дуга, уходящая к стреле.
+    # Радужный хвост: изогнутая лента, сужающаяся к началу, с мягким ореолом.
     trail = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     td = ImageDraw.Draw(trail)
     points = []
-    for i in range(60):
-        t = i / 59
-        x = 14 + 74 * t
-        y = 104 - 70 * t - 22 * math.sin(math.pi * t)
-        points.append((x, y))
+    for i in range(80):
+        t = i / 79
+        points.append((8 + 46 * t + 10 * math.sin(math.pi * t), 122 - 50 * t + 12 * math.sin(math.pi * t)))
     for i in range(len(points) - 1):
-        r, g, b = hsv(i / len(points))
-        width = int(3 + 7 * (i / len(points)))
-        td.line([points[i], points[i + 1]], fill=(r, g, b, 235), width=width)
-    glow = trail.filter(ImageFilter.GaussianBlur(4))
-    img.alpha_composite(glow)
+        t = i / len(points)
+        cr, cg, cb = hsv(0.75 - t * 0.85)
+        td.line([points[i], points[i + 1]], fill=(cr, cg, cb, int(80 + 175 * t)), width=int(2 + 9 * t))
+    img.alpha_composite(trail.filter(ImageFilter.GaussianBlur(5)))
     img.alpha_composite(trail)
 
-    arrow = item_texture().resize((64, 64), Image.NEAREST)
-    img.alpha_composite(arrow, (60, 4))
+    arrow = item_texture().resize((80, 80), Image.NEAREST)
+    halo = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    silhouette = Image.new("RGBA", arrow.size, (255, 50, 70, 255))
+    halo.paste(silhouette, (44, 0), arrow.split()[3])
+    img.alpha_composite(halo.filter(ImageFilter.GaussianBlur(6)))
+    img.alpha_composite(arrow, (44, 0))
     return img
 
 
@@ -206,6 +239,28 @@ def launch() -> np.ndarray:
     return normalize(whoosh * 1.6 + rise, 0.8)
 
 
+def flight() -> np.ndarray:
+    """Свист стрелы в полёте — ровно 2 секунды, зациклен без щелчка.
+
+    Частоты тона, вибрато и пульсации кратны 0,5 Гц, а шум синтезирован через обратное БПФ,
+    поэтому конец сигнала гладко переходит в начало.
+    """
+    seconds = 2
+    n = seconds * RATE
+    t = np.arange(n) / RATE
+    vibrato = 25 * np.sin(2 * np.pi * 4 * t)
+    phase = 2 * np.pi * np.cumsum(1500 + vibrato) / RATE
+    whistle_tone = 0.25 * np.sin(phase) + 0.06 * np.sin(2 * phase)
+    spectrum_freqs = np.fft.rfftfreq(n, 1 / RATE)
+    rng = np.random.default_rng(5)
+    shape = np.exp(-((spectrum_freqs - 3200) / 1400) ** 2)
+    spectrum = shape * np.exp(2j * np.pi * rng.random(spectrum_freqs.size))
+    air = np.fft.irfft(spectrum, n)
+    air = air / np.max(np.abs(air)) * 0.5
+    pulse = 1 + 0.15 * np.sin(2 * np.pi * 2 * t)
+    return normalize((whistle_tone + air) * pulse, 0.6)
+
+
 def normalize(signal: np.ndarray, peak: float) -> np.ndarray:
     return signal / max(1e-9, np.max(np.abs(signal))) * peak
 
@@ -221,7 +276,8 @@ def write_ogg(signal: np.ndarray, target: Path) -> None:
             wav.writeframes(pcm.tobytes())
         # Minecraft воспроизводит позиционно только моно OGG Vorbis.
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(wav_path), "-ac", "1",
-                        "-c:a", "libvorbis", "-q:a", "5", "-map_metadata", "-1", str(target)], check=True)
+                        "-c:a", "libvorbis", "-q:a", "5", "-map_metadata", "-1", "-fflags", "+bitexact",
+                        "-flags:a", "+bitexact", "-serial_offset", "1", str(target)], check=True)
 
 
 def main() -> int:
@@ -230,12 +286,15 @@ def main() -> int:
     (ASSETS / "sounds").mkdir(parents=True, exist_ok=True)
 
     item_texture().save(ASSETS / "textures/item/olegus_arrow.png")
-    entity_texture().save(ASSETS / "textures/entity/olegus_arrow.png")
+    model_texture().save(ASSETS / "textures/entity/olegus_arrow.png")
+    glow_texture().save(ASSETS / "textures/entity/olegus_arrow_glow.png")
+    trail_texture().save(ASSETS / "textures/entity/olegus_arrow_trail.png")
     mod_icon().save(ASSETS / "icon.png")
 
     write_ogg(whistle(), ASSETS / "sounds/whistle.ogg")
     write_ogg(respond(), ASSETS / "sounds/respond.ogg")
     write_ogg(launch(), ASSETS / "sounds/launch.ogg")
+    write_ogg(flight(), ASSETS / "sounds/flight.ogg")
     print("Ассеты обновлены в", ASSETS)
     return 0
 

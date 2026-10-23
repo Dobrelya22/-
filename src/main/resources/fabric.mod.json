@@ -9,8 +9,7 @@
   "environment": "*",
   "entrypoints": {
     "main": ["com.olegus.arrow.OlegusArrowMod"],
-    "client": ["com.olegus.arrow.client.OlegusArrowClient"],
-    "fabric-gametest": ["com.olegus.arrow.gametest.OlegusArrowGameTests"]
+    "client": ["com.olegus.arrow.client.OlegusArrowClient"]
   },
   "depends": {
     "fabricloader": ">=0.16.0",
