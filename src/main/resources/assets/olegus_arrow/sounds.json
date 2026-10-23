@@ -1,0 +1,14 @@
+{
+  "whistle": {
+    "subtitle": "subtitles.olegus_arrow.whistle",
+    "sounds": ["olegus_arrow:whistle"]
+  },
+  "respond": {
+    "subtitle": "subtitles.olegus_arrow.respond",
+    "sounds": ["olegus_arrow:respond"]
+  },
+  "launch": {
+    "subtitle": "subtitles.olegus_arrow.launch",
+    "sounds": ["olegus_arrow:launch"]
+  }
+}

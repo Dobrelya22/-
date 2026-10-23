@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "olegus_arrow",
+  "version": "${version}",
+  "name": "Стрела Олегуса",
+  "description": "Волшебная самонаводящаяся стрела в духе стрелы Йонду: облетает препятствия, охотится на мобов, оставляет радужный след и возвращается на свист.",
+  "authors": ["Olegus"],
+  "icon": "assets/olegus_arrow/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.olegus.arrow.OlegusArrowMod"],
+    "client": ["com.olegus.arrow.client.OlegusArrowClient"],
+    "fabric-gametest": ["com.olegus.arrow.gametest.OlegusArrowGameTests"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

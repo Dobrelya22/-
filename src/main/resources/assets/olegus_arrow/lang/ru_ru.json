@@ -1,0 +1,37 @@
+{
+  "item.olegus_arrow.olegus_arrow": "Стрела Олегуса",
+  "entity.olegus_arrow.olegus_arrow": "Стрела Олегуса",
+
+  "key.category.olegus_arrow": "Стрела Олегуса",
+  "key.olegus_arrow.toggle_mode": "Сменить режим стрелы",
+  "key.olegus_arrow.designate": "Указать цель стреле",
+  "key.olegus_arrow.whistle": "Свистнуть (отозвать стрелу)",
+
+  "mode.olegus_arrow.target": "Выбранная цель",
+  "mode.olegus_arrow.all": "Все мобы (50 бл.)",
+
+  "hud.olegus_arrow.seconds": "%s с",
+  "hud.olegus_arrow.waiting": "ждёт цель",
+  "hud.olegus_arrow.returning": "возвращается",
+  "hud.olegus_arrow.finale": "время вышло",
+  "hud.olegus_arrow.boost": "×%s",
+
+  "tooltip.olegus_arrow.launch": "ПКМ — выпустить стрелу на 40 секунд",
+  "tooltip.olegus_arrow.mode": "%s — сменить режим",
+  "tooltip.olegus_arrow.designate": "%s — указать цель взглядом",
+  "tooltip.olegus_arrow.whistle": "%s — свистнуть и отозвать",
+
+  "message.olegus_arrow.waiting_for_target": "Цели под прицелом нет — наведитесь на моба и нажмите %s",
+  "message.olegus_arrow.no_target": "Под прицелом нет моба",
+  "message.olegus_arrow.no_arrow": "Стрела не выпущена",
+  "message.olegus_arrow.target_set": "Цель стрелы: %s",
+  "message.olegus_arrow.server_missing": "На сервере не установлен мод «Стрела Олегуса»",
+
+  "subtitles.olegus_arrow.whistle": "Свист",
+  "subtitles.olegus_arrow.respond": "Стрела отзывается",
+  "subtitles.olegus_arrow.launch": "Стрела взмывает",
+
+  "death.attack.olegus_arrow": "%1$s пронзён Стрелой Олегуса игрока %2$s",
+  "death.attack.olegus_arrow.item": "%1$s пронзён Стрелой Олегуса игрока %2$s (%3$s)",
+  "death.attack.olegus_arrow.player": "%1$s пронзён Стрелой Олегуса, убегая от %2$s"
+}

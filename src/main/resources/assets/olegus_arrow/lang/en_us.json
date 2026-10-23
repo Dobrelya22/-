@@ -1,0 +1,37 @@
+{
+  "item.olegus_arrow.olegus_arrow": "Olegus Arrow",
+  "entity.olegus_arrow.olegus_arrow": "Olegus Arrow",
+
+  "key.category.olegus_arrow": "Olegus Arrow",
+  "key.olegus_arrow.toggle_mode": "Switch arrow mode",
+  "key.olegus_arrow.designate": "Point arrow at target",
+  "key.olegus_arrow.whistle": "Whistle (recall arrow)",
+
+  "mode.olegus_arrow.target": "Chosen target",
+  "mode.olegus_arrow.all": "All mobs (50 blocks)",
+
+  "hud.olegus_arrow.seconds": "%ss",
+  "hud.olegus_arrow.waiting": "awaiting target",
+  "hud.olegus_arrow.returning": "returning",
+  "hud.olegus_arrow.finale": "time is up",
+  "hud.olegus_arrow.boost": "×%s",
+
+  "tooltip.olegus_arrow.launch": "Right-click to release the arrow for 40 seconds",
+  "tooltip.olegus_arrow.mode": "%s — switch mode",
+  "tooltip.olegus_arrow.designate": "%s — point at a target",
+  "tooltip.olegus_arrow.whistle": "%s — whistle to recall",
+
+  "message.olegus_arrow.waiting_for_target": "No mob in sight — aim at one and press %s",
+  "message.olegus_arrow.no_target": "No mob in sight",
+  "message.olegus_arrow.no_arrow": "The arrow is not in flight",
+  "message.olegus_arrow.target_set": "Arrow target: %s",
+  "message.olegus_arrow.server_missing": "The server does not have the Olegus Arrow mod",
+
+  "subtitles.olegus_arrow.whistle": "Whistle",
+  "subtitles.olegus_arrow.respond": "Arrow answers",
+  "subtitles.olegus_arrow.launch": "Arrow takes flight",
+
+  "death.attack.olegus_arrow": "%1$s was pierced by %2$s's Olegus Arrow",
+  "death.attack.olegus_arrow.item": "%1$s was pierced by %2$s's Olegus Arrow using %3$s",
+  "death.attack.olegus_arrow.player": "%1$s was pierced by an Olegus Arrow while fleeing %2$s"
+}
