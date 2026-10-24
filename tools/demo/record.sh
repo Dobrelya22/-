@@ -85,10 +85,11 @@ echo "Неповторяющихся кадров: $DISTINCT из $TOTAL"
 python3 tools/demo/sound_track.py run-demo/demo-sounds.txt run-demo/demo-markers.txt "$DILATION" "$OUT/sfx.wav"
 
 if [ -n "$NARRATION" ] && [ -f "$NARRATION" ]; then
-  # Голос поверх звуков игры; звуки приглушаются, пока говорит голос.
+  # Голос поверх звуков игры; звуки приглушаются, пока говорит голос, а громкие (свист)
+  # поджимаются компрессором, чтобы не перекрикивать голос.
   ffmpeg -loglevel error -y -i "$OUT/video.mp4" -i "$OUT/sfx.wav" -i "$NARRATION" -filter_complex \
     "[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice][key];\
-     [1:a]volume=0.8[game];[game][key]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=400[ducked];\
+     [1:a]acompressor=threshold=0.05:ratio=4:attack=5:release=250,volume=1.4[game];[game][key]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=400[ducked];\
      [ducked][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[audio]" \
     -map 0:v -map "[audio]" -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/olegus-arrow-demo.mp4"
 else

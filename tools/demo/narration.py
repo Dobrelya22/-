@@ -17,7 +17,7 @@ from piper import PiperVoice
 # Ударения, которые espeak-ng ставит неверно: фонемы слова → исправленные.
 STRESS_FIXES = {"danʲˈik": "dˈanʲɪk"}
 # Средняя высота голоса после обработки — низкий баритон.
-TARGET_F0 = 100.0
+TARGET_F0 = 95.0
 # Формантам — чуть ниже, чем было: голос звучит грудным, а не «мультяшным».
 FORMANT_SHIFT = 0.94
 SENTENCE_PAUSE = 0.22
@@ -138,22 +138,14 @@ def main():
 
     raw_path = args.out + ".raw.wav"
     write_wav(raw_path, track, rate)
+    # Высоту меряем по исходному голосу: после компрессора оценка ненадёжна (завышается),
+    # поэтому сдвиг считается один раз и не «уточняется» по готовому звуку.
     f0 = median_f0(track, rate)
-    pitch = min(1.0, max(0.6, TARGET_F0 / f0)) if f0 > 0 else 0.8
-    print(f"Голос: основной тон {f0:.0f} Гц")
-    # Сдвиг высоты оценивается по готовому звуку и при необходимости уточняется.
-    for _ in range(3):
-        lower(raw_path, args.out, rate, pitch)
-        result, result_rate = read_wav(args.out)
-        result_f0 = median_f0(result, result_rate)
-        print(f"  понижение в {1 / pitch:.2f} раза → {result_f0:.0f} Гц")
-        if result_f0 <= 0 or abs(result_f0 / TARGET_F0 - 1.0) < 0.04:
-            break
-        corrected = min(1.0, max(0.6, pitch * TARGET_F0 / result_f0))
-        if corrected == pitch:
-            break
-        pitch = corrected
-    print(f"Готово: {args.out}, {len(result) / result_rate:.1f} с, основной тон {result_f0:.0f} Гц")
+    pitch = min(1.0, max(0.65, TARGET_F0 / f0)) if f0 > 0 else 0.78
+    print(f"Голос: основной тон {f0:.0f} Гц, понижаю в {1 / pitch:.2f} раза — до ~{f0 * pitch:.0f} Гц")
+    lower(raw_path, args.out, rate, pitch)
+    result, result_rate = read_wav(args.out)
+    print(f"Готово: {args.out}, {len(result) / result_rate:.1f} с")
 
 
 def lower(source, out, rate, pitch):

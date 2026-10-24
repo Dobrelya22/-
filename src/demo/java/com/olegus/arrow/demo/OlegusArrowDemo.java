@@ -148,6 +148,7 @@ public class OlegusArrowDemo implements ClientModInitializer {
                 player.sendAbilitiesUpdate();
             });
             client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
+            client.inGameHud.getChatHud().clear(false);
             this.look(0.0F, VIEW_PITCH);
             this.caption = Text.literal("Стрела Олегуса — демонстрация мода");
         });
@@ -298,6 +299,9 @@ public class OlegusArrowDemo implements ClientModInitializer {
         rules.get(GameRules.DO_DAYLIGHT_CYCLE).set(false, null);
         rules.get(GameRules.DO_WEATHER_CYCLE).set(false, null);
         rules.get(GameRules.ANNOUNCE_ADVANCEMENTS).set(false, null);
+        // Иначе в чате видно, как сценарий замедляет игру командой /tick rate.
+        rules.get(GameRules.SEND_COMMAND_FEEDBACK).set(false, null);
+        rules.get(GameRules.LOG_ADMIN_COMMANDS).set(false, null);
         LevelInfo info = new LevelInfo("olegus-demo", GameMode.CREATIVE, false, Difficulty.EASY, true,
                 rules, DataConfiguration.SAFE_MODE);
         client.createIntegratedServerLoader().createAndStart("olegus-demo", info,
