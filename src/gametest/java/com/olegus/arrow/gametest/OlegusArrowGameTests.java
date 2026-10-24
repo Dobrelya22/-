@@ -130,6 +130,38 @@ public class OlegusArrowGameTests implements FabricGameTest {
         }, () -> describe(context, arrow) + " | цель " + describe(context, chosen));
     }
 
+    /** Цель за стеной до земли: стрела должна облететь её сверху или сбоку и добить цель. */
+    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_wall_target", tickLimit = 900)
+    public void targetBehindWallIsReached(TestContext context) {
+        ServerWorld world = context.getWorld();
+        List<BlockPos> wall = buildWall(context, 4, -1, 6, -4, 10);
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity husk = spawnStillHusk(context, new BlockPos(8, 2, 3));
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.TARGET, husk);
+        succeedWhen(context, 900, 20, () -> !husk.isAlive(), arrow::discard,
+                () -> describe(context, arrow) + " | цель " + describe(context, husk),
+                () -> removeBlocks(context, wall));
+    }
+
+    /** Та же раскладка, что в охоте на всех, но с висящей стеной между игроком и частью мобов. */
+    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_wall_all", tickLimit = 900)
+    public void allModeFliesAroundWall(TestContext context) {
+        ServerWorld world = context.getWorld();
+        List<BlockPos> wall = buildWall(context, 3, 1, 5, 0, 6);
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity first = spawnStillHusk(context, new BlockPos(6, 2, 6));
+        HuskEntity second = spawnStillHusk(context, new BlockPos(-3, 2, 7));
+        PigEntity pig = context.spawnEntity(EntityType.PIG, new BlockPos(7, 2, -2));
+        pig.setAiDisabled(true);
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.ALL, null);
+        succeedWhen(context, 900, 20, () -> !first.isAlive() && !second.isAlive() && !pig.isAlive(), arrow::discard,
+                () -> describe(context, arrow) + " | хаск1 " + describe(context, first) + " | хаск2 "
+                        + describe(context, second) + " | свинья " + describe(context, pig),
+                () -> removeBlocks(context, wall));
+    }
+
     @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_whistle", tickLimit = 200)
     public void whistleBringsArrowBack(TestContext context) {
         ServerWorld world = context.getWorld();
@@ -164,11 +196,12 @@ public class OlegusArrowGameTests implements FabricGameTest {
     /**
      * Проверяет условие каждые 5 тиков; как только оно выполнилось — финальные проверки и успех.
      * Проверки расписаны заранее: планировать новые задачи изнутри задачи теста небезопасно.
-     * Раз в 100 тиков состояние пишется в лог, а если условие так и не выполнилось — тест падает
-     * с этим состоянием в сообщении, чтобы было видно, что пошло не так.
+     * Раз в {@code traceEvery} тиков состояние пишется в лог, а если условие так и не выполнилось —
+     * тест падает с этим состоянием в сообщении. {@code cleanup} выполняется в любом случае, чтобы
+     * следующие тесты на том же месте начинали с чистого мира.
      */
-    private static void succeedWhen(TestContext context, int tickLimit, BooleanSupplier condition, Runnable onSuccess,
-                                    Supplier<String> state) {
+    private static void succeedWhen(TestContext context, int tickLimit, int traceEvery, BooleanSupplier condition,
+                                    Runnable onSuccess, Supplier<String> state, Runnable cleanup) {
         boolean[] done = {false};
         for (int tick = 5; tick < tickLimit - 5; tick += 5) {
             int at = tick;
@@ -178,18 +211,46 @@ public class OlegusArrowGameTests implements FabricGameTest {
                 }
                 if (condition.getAsBoolean()) {
                     done[0] = true;
+                    cleanup.run();
                     onSuccess.run();
                     context.complete();
-                } else if (at % 100 == 0) {
+                } else if (at % traceEvery == 0) {
                     OlegusArrowMod.LOGGER.info("[тест, тик {}] {}", at, state.get());
                 }
             });
         }
         context.waitAndRun(tickLimit - 3, () -> {
             if (!done[0]) {
-                context.assertTrue(condition.getAsBoolean(), "Не дождались: " + state.get());
+                done[0] = true;
+                String finalState = state.get();
+                cleanup.run();
+                context.assertTrue(condition.getAsBoolean(), "Не дождались: " + finalState);
             }
         });
+    }
+
+    private static void succeedWhen(TestContext context, int tickLimit, BooleanSupplier condition, Runnable onSuccess,
+                                    Supplier<String> state) {
+        succeedWhen(context, tickLimit, 100, condition, onSuccess, state, () -> { });
+    }
+
+    /** Стена из камня в плоскости x = {@code x}; возвращает её блоки, чтобы потом убрать. */
+    private static List<BlockPos> buildWall(TestContext context, int x, int fromY, int toY, int fromZ, int toZ) {
+        List<BlockPos> blocks = new java.util.ArrayList<>();
+        for (int y = fromY; y <= toY; y++) {
+            for (int z = fromZ; z <= toZ; z++) {
+                BlockPos pos = context.getAbsolutePos(new BlockPos(x, y, z));
+                context.getWorld().setBlockState(pos, Blocks.STONE.getDefaultState());
+                blocks.add(pos);
+            }
+        }
+        return blocks;
+    }
+
+    private static void removeBlocks(TestContext context, List<BlockPos> blocks) {
+        for (BlockPos pos : blocks) {
+            context.getWorld().setBlockState(pos, Blocks.AIR.getDefaultState());
+        }
     }
 
     private static String describe(TestContext context, Entity entity) {
