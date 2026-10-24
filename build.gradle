@@ -9,17 +9,25 @@ base {
     archivesName = project.archives_base_name
 }
 
-// Игровые тесты живут отдельно и в jar мода не попадают; ./gradlew build их не компилирует.
+loom {
+    splitEnvironmentSourceSets()
+}
+
+// Игровые тесты и демо-сценарий живут отдельно и в jar мода не попадают.
 sourceSets {
     gametest {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
+    demo {
+        compileClasspath += sourceSets.client.compileClasspath + sourceSets.main.output + sourceSets.client.output
+        runtimeClasspath += sourceSets.client.runtimeClasspath + sourceSets.main.output + sourceSets.client.output
+    }
 }
+// Классы и fabric.mod.json демо в одной папке: так Fabric видит его отдельным модом без группировки в loom.mods.
+sourceSets.demo.output.resourcesDir = sourceSets.demo.java.destinationDirectory.get().asFile
 
 loom {
-    splitEnvironmentSourceSets()
-
     mods {
         'olegus_arrow' {
             sourceSet sourceSets.main
@@ -39,6 +47,15 @@ loom {
             vmArg '-Dfabric-api.gametest'
             vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get().asFile}/gametest/report.xml"
             runDir 'build/gametest'
+        }
+        // Демонстрационный ролик: ./gradlew runDemo (игра сама создаёт мир и показывает стрелу)
+        demo {
+            client()
+            name 'Demo'
+            source sourceSets.demo
+            vmArg '-Dolegus.demo=true'
+            programArgs '--width', '1280', '--height', '720'
+            runDir 'run-demo'
         }
     }
 }

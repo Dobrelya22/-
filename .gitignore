@@ -17,6 +17,7 @@ bin/
 
 # Запуски Minecraft
 run/
+run-demo/
 remappedSrc/
 
 # Системное

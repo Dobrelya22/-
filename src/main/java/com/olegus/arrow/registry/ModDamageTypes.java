@@ -20,8 +20,10 @@ public final class ModDamageTypes {
     private ModDamageTypes() {
     }
 
+    /** Если тип урона из данных мода почему-то не загрузился, бьём как обычный снаряд, а не падаем. */
     public static DamageSource arrow(World world, Entity arrow, @Nullable Entity attacker) {
-        return new DamageSource(
-                world.getRegistryManager().get(RegistryKeys.DAMAGE_TYPE).entryOf(OLEGUS_ARROW), arrow, attacker);
+        return world.getRegistryManager().get(RegistryKeys.DAMAGE_TYPE).getEntry(OLEGUS_ARROW)
+                .map(type -> new DamageSource(type, arrow, attacker))
+                .orElseGet(() -> world.getDamageSources().thrown(arrow, attacker));
     }
 }

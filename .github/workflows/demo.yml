@@ -1,0 +1,70 @@
+name: demo
+
+# Записывает демонстрационный ролик мода: настоящий клиент Minecraft на виртуальном экране.
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Пакеты для записи
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb pulseaudio ffmpeg libgl1-mesa-dri mesa-utils
+
+      - name: Запись ролика
+        run: tools/demo/record.sh build/demo
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: olegus-arrow-demo
+          path: build/demo/
+
+      # Несколько кадров прямо в логе — чтобы проверить ролик, не скачивая его.
+      - name: Кадры для проверки
+        if: always()
+        run: |
+          for t in 2 6 9 12 16 20 26 33 40 52 66 74 79 82 87; do
+            if ffmpeg -loglevel error -y -ss "$t" -i build/demo/olegus-arrow-demo.mp4 -frames:v 1 \
+                 -vf scale=640:-2 -q:v 7 /tmp/frame.jpg; then
+              echo "FRAME $t $(base64 -w0 /tmp/frame.jpg)"
+            fi
+          done
+
+      - name: Журнал игры
+        if: always()
+        run: grep -E "ERROR|Exception|olegus|Демо" build/demo/latest.log | head -100 || true
+
+  share:
+    needs: record
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: olegus-arrow-demo
+          path: demo
+
+      # Облегчённая копия ролика текстом в логе: её можно забрать без доступа к хранилищу артефактов.
+      - name: Ролик в логе
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          ffmpeg -loglevel error -y -i demo/olegus-arrow-demo.mp4 -vf scale=854:-2 -r 24 \
+            -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart small.mp4
+          ls -l small.mp4
+          echo "VIDEO-BEGIN $(stat -c %s small.mp4)"
+          base64 -w 60000 small.mp4 | sed 's/^/VIDEO /'
+          echo "VIDEO-END"

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "olegus_arrow_demo",
+  "version": "1.0.0",
+  "name": "Olegus Arrow — demo",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.olegus.arrow.demo.OlegusArrowDemo"]
+  },
+  "depends": {
+    "olegus_arrow": "*"
+  }
+}
