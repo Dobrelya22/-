@@ -6,12 +6,17 @@ import com.olegus.arrow.client.ClientArrowState;
 import com.olegus.arrow.entity.OlegusArrowEntity;
 import com.olegus.arrow.registry.ModItems;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -24,13 +29,19 @@ import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.option.Perspective;
+import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.sound.Sound;
+import net.minecraft.client.sound.SoundInstance;
+import net.minecraft.client.sound.TickableSoundInstance;
+import net.minecraft.client.sound.WeightedSoundSet;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.DataConfiguration;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
@@ -47,12 +58,22 @@ import net.minecraft.world.level.LevelInfo;
  * (./gradlew runDemo) и в jar мода не попадает. Создаёт плоский мир, расставляет мобов
  * и играет за игрока: целится, выпускает стрелу, жмёт клавиши режима и свиста — теми же
  * путями, что и живой игрок. Вверху экрана идут подписи.
+ *
+ * <p>Программный OpenGL в CI рисует всего несколько кадров в секунду, поэтому игру можно
+ * замедлить (переменная OLEGUS_DEMO_TICK_RATE → /tick rate) и потом ускорить запись до
+ * плавных 60 кадров. Звук при этом пишется не с колонок, а журналом: какой звук, когда,
+ * где и с какой громкостью (demo-sounds.txt) — из него tools/demo/sound_track.py собирает
+ * звуковую дорожку в масштабе ролика.
  */
 public class OlegusArrowDemo implements ClientModInitializer {
     private static final boolean ENABLED = Boolean.getBoolean("olegus.demo");
     /** Время начала и конца сценария — по нему обрезается запись экрана. */
     private static final Path MARKERS = Path.of("demo-markers.txt");
+    private static final Path SOUNDS = Path.of("demo-sounds.txt");
     private static final int WARMUP_TICKS = 80;
+    /** На каком тике разминки замедлять игру: мир уже загружен, но сценарий ещё не начался. */
+    private static final int SLOWDOWN_TICK = 40;
+    private static final float TICK_RATE = tickRateFromEnvironment();
     /** Игрок висит над полем, камера — от третьего лица со спины. */
     private static final Vec3d HOVER = new Vec3d(0.5, -56.5, -2.5);
     private static final float VIEW_PITCH = 28.0F;
@@ -78,6 +99,12 @@ public class OlegusArrowDemo implements ClientModInitializer {
     private boolean steering;
     /** Пока стрела охотится, камера следит за ней и её целью. */
     private boolean follow;
+    private PrintWriter soundLog;
+    /** После конца сценария журнал не трогаем: повторное открытие стёрло бы его. */
+    private boolean soundLogClosed;
+    /** Звуки, которые меняют громкость и высоту на ходу (свист стрелы в полёте), и их номера в журнале. */
+    private final Map<TickableSoundInstance, Integer> loops = new IdentityHashMap<>();
+    private int loopCount;
 
     @Override
     public void onInitializeClient() {
@@ -126,45 +153,42 @@ public class OlegusArrowDemo implements ClientModInitializer {
         });
         // Животные, сгенерированные вместе с миром, убраны выше; убираем и выпавший с них лут.
         at(0.2, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
-        at(3.0, client -> this.caption = Text.literal("Режим «Выбранная цель»: стрела бьёт только моба под прицелом"));
-        at(3.5, client -> this.lookAt(client, new Vec3d(-2.5, -59.0, 5.5)));
-        at(5.0, client -> {
+        // Секунды совпадают с закадровым голосом: tools/demo/narration.txt.
+        at(9.5, client -> this.caption = Text.literal("Режим «Выбранная цель»: стрела бьёт только моба под прицелом"));
+        at(10.0, client -> this.lookAt(client, new Vec3d(-2.5, -59.0, 5.5)));
+        at(15.0, client -> {
             this.useArrow(client);
             this.follow = true;
         });
-        at(10.0, client -> {
+        at(22.4, client -> {
             this.caption = Text.literal("Цель повержена. Остальных стрела не тронула и ждёт рядом");
             this.look(0.0F, VIEW_PITCH);
         });
-        at(13.0, client -> {
+        at(27.2, client -> this.caption = Text.literal("Свист (клавиша G): стрела отзывается и возвращается в руку"));
+        at(30.4, client -> press(ArrowKeyBindings.WHISTLE));
+        at(36.4, client -> {
             this.caption = Text.literal("Клавиша R — режим «Все мобы в радиусе 50 блоков»");
             command(client, "fill 2 -60 10 9 -57 10 minecraft:stone_bricks");
             for (int i = 0; i < 6; i++) {
                 command(client, mob("husk", 3 + (i % 3) * 2, 13 + (i / 3) * 2, null));
             }
         });
-        at(14.0, client -> press(ArrowKeyBindings.TOGGLE_MODE));
-        at(17.0, client -> this.caption = Text.literal("Стрела по очереди атакует всех мобов и облетает стены"));
-        at(23.0, client -> this.caption = Text.literal("В толпе больше трёх мобов она разгоняется до ×2, урон прежний"));
-        at(31.0, client -> this.caption = Text.literal("Свист (клавиша G): стрела отзывается и возвращается в руку"));
-        at(32.0, client -> press(ArrowKeyBindings.WHISTLE));
-        at(36.0, client -> {
-            this.caption = Text.literal("Снова в бой: стрела действует 40 секунд");
-            spawnWave(client, 0);
-        });
-        at(37.0, this::useArrow);
-        at(47.0, client -> {
+        at(37.6, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        // Второй пуск: дальше все 40 секунд жизни стрелы, до колокольчика и финала.
+        at(43.8, this::useArrow);
+        at(45.4, client -> this.caption = Text.literal("Стрела по очереди атакует всех мобов и облетает стены"));
+        at(50.0, client -> spawnWave(client, 0));
+        at(51.0, client -> this.caption = Text.literal("В толпе больше трёх мобов она разгоняется до ×2, урон прежний"));
+        at(59.0, client -> {
             this.caption = Text.literal("Над полоской здоровья — режим, оставшееся время и победы");
             spawnWave(client, 1);
         });
-        at(57.0, client -> {
-            this.caption = Text.literal("Игроков стрела не трогает — только мобов");
-            spawnWave(client, 2);
-        });
-        at(72.0, client -> this.caption = Text.literal("За 5 секунд до конца звенит колокольчик"));
-        at(77.0, client -> this.caption = Text.literal("Время вышло: стрела кружит вокруг хозяина…"));
-        at(80.5, client -> this.caption = Text.literal("…и падает предметом, который можно подобрать"));
-        at(82.5, client -> server(client, server -> {
+        at(68.0, client -> spawnWave(client, 2));
+        at(72.6, client -> this.caption = Text.literal("Игроков стрела не трогает — только мобов"));
+        at(78.8, client -> this.caption = Text.literal("За 5 секунд до конца звенит колокольчик"));
+        at(83.8, client -> this.caption = Text.literal("Время вышло: стрела кружит вокруг хозяина…"));
+        at(87.3, client -> this.caption = Text.literal("…и падает предметом, который можно подобрать"));
+        at(89.3, client -> server(client, server -> {
             // Игрок спускается к упавшей стреле и подбирает её.
             ServerPlayerEntity player = server.getPlayerManager().getPlayerList().get(0);
             List<ItemEntity> drops = player.getServerWorld().getEntitiesByClass(ItemEntity.class,
@@ -176,9 +200,10 @@ public class OlegusArrowDemo implements ClientModInitializer {
                 player.requestTeleport(drop.getX(), drop.getY(), drop.getZ() - 0.8);
             }
         }));
-        at(86.0, client -> this.caption = Text.literal("Стрела снова в инвентаре. Конец демонстрации"));
-        at(90.0, client -> {
+        at(91.8, client -> this.caption = Text.literal("Стрела снова в инвентаре. Конец демонстрации"));
+        at(99.5, client -> {
             mark("end");
+            this.closeSoundLog();
             client.scheduleStop();
         });
     }
@@ -232,6 +257,12 @@ public class OlegusArrowDemo implements ClientModInitializer {
             return;
         }
         if (this.warmup < WARMUP_TICKS) {
+            if (this.warmup == 0) {
+                client.getSoundManager().registerListener(this::onSoundPlayed);
+            }
+            if (this.warmup == SLOWDOWN_TICK && TICK_RATE != 20.0F) {
+                command(client, String.format(Locale.ROOT, "tick rate %.4f", TICK_RATE));
+            }
             this.warmup++;
             return;
         }
@@ -244,6 +275,19 @@ public class OlegusArrowDemo implements ClientModInitializer {
         // Всплывающие «Новое достижение» загораживают кадр.
         client.getToastManager().clear();
         this.steer(client);
+        this.logLoopsAndCamera(client);
+        if (this.tick % 40 == 0) {
+            OlegusArrowMod.LOGGER.info("Демо: секунда {}, {} кадров/с", this.tick / 20, client.getCurrentFps());
+        }
+    }
+
+    private static float tickRateFromEnvironment() {
+        String value = System.getenv("OLEGUS_DEMO_TICK_RATE");
+        try {
+            return value == null || value.isBlank() ? 20.0F : MathHelper.clamp(Float.parseFloat(value), 1.0F, 20.0F);
+        } catch (NumberFormatException e) {
+            return 20.0F;
+        }
     }
 
     private static void createWorld(MinecraftClient client) {
@@ -333,6 +377,82 @@ public class OlegusArrowDemo implements ClientModInitializer {
         context.getMatrices().scale(scale, scale, 1.0F);
         context.drawCenteredTextWithShadow(font, this.caption, 0, 0, 0xFFFFFF);
         context.getMatrices().pop();
+    }
+
+    // ---------------------------------------------------------------- журнал звуков
+
+    /**
+     * Каждый прозвучавший звук: время (мс), файл, громкость с учётом настроек, высота, дальность
+     * слышимости (inf — без затухания), координаты и номер, если звук меняется на ходу.
+     */
+    private void onSoundPlayed(SoundInstance sound, WeightedSoundSet soundSet, float range) {
+        Sound chosen = sound.getSound();
+        if (this.tick < 0 || chosen == null) {
+            return;
+        }
+        int loop = 0;
+        if (sound instanceof TickableSoundInstance tickable && !tickable.isDone()) {
+            loop = ++this.loopCount;
+            this.loops.put(tickable, loop);
+        }
+        this.log(String.format(Locale.ROOT, "sound %d %s %.4f %.4f %s %.3f %.3f %.3f %d %s",
+                System.currentTimeMillis(), chosen.getLocation(), gain(sound), pitch(sound),
+                Float.isInfinite(range) ? "inf" : String.format(Locale.ROOT, "%.2f", range),
+                sound.getX(), sound.getY(), sound.getZ(), loop, sound.isRelative() ? "rel" : "abs"));
+    }
+
+    /** Громкость и высота меняющихся звуков и положение слушателя — каждый тик. */
+    private void logLoopsAndCamera(MinecraftClient client) {
+        long now = System.currentTimeMillis();
+        for (Iterator<Map.Entry<TickableSoundInstance, Integer>> it = this.loops.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<TickableSoundInstance, Integer> entry = it.next();
+            TickableSoundInstance sound = entry.getKey();
+            if (sound.isDone() || !client.getSoundManager().isPlaying(sound)) {
+                this.log("stop " + now + " " + entry.getValue());
+                it.remove();
+            } else {
+                this.log(String.format(Locale.ROOT, "loop %d %d %.4f %.4f %.3f %.3f %.3f", now, entry.getValue(),
+                        gain(sound), pitch(sound), sound.getX(), sound.getY(), sound.getZ()));
+            }
+        }
+        Camera camera = client.gameRenderer.getCamera();
+        this.log(String.format(Locale.ROOT, "camera %d %.3f %.3f %.3f %.2f", now,
+                camera.getPos().x, camera.getPos().y, camera.getPos().z, camera.getYaw()));
+    }
+
+    /** Как SoundSystem: громкость звука × громкость категории, не больше 1, и общая громкость. */
+    private static float gain(SoundInstance sound) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        SoundCategory category = sound.getCategory();
+        float categoryVolume = category == null || category == SoundCategory.MASTER
+                ? 1.0F : client.options.getSoundVolume(category);
+        return MathHelper.clamp(sound.getVolume() * categoryVolume, 0.0F, 1.0F)
+                * client.options.getSoundVolume(SoundCategory.MASTER);
+    }
+
+    private static float pitch(SoundInstance sound) {
+        return MathHelper.clamp(sound.getPitch(), 0.5F, 2.0F);
+    }
+
+    private void log(String line) {
+        if (this.soundLogClosed) {
+            return;
+        }
+        try {
+            if (this.soundLog == null) {
+                this.soundLog = new PrintWriter(Files.newBufferedWriter(SOUNDS, StandardCharsets.UTF_8));
+            }
+            this.soundLog.println(line);
+        } catch (IOException e) {
+            OlegusArrowMod.LOGGER.warn("Не удалось записать журнал звуков", e);
+        }
+    }
+
+    private void closeSoundLog() {
+        this.soundLogClosed = true;
+        if (this.soundLog != null) {
+            this.soundLog.close();
+        }
     }
 
     // ---------------------------------------------------------------- служебное

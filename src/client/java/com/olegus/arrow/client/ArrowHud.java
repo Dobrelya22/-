@@ -13,7 +13,6 @@ import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.Util;
 import net.minecraft.util.math.MathHelper;
 
 /** Строка над полоской здоровья: режим стрелы, а пока она летит — её состояние и оставшееся время. */
@@ -39,7 +38,7 @@ public final class ArrowHud {
         TextRenderer font = client.textRenderer;
         int left = context.getScaledWindowWidth() / 2 - 91;
         int y = lineY(client, player, context.getScaledWindowHeight());
-        long now = Util.getMeasuringTimeMs();
+        long now = ClientArrowState.gameMillis();
 
         int iconColor = Rainbow.hsvToRgb((now % 3000L) / 3000.0F, 0.8F, 1.0F);
         context.drawTextWithShadow(font, Text.literal(ICON), left, y, iconColor);
