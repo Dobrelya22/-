@@ -8,7 +8,9 @@ public enum ArrowMode implements StringIdentifiable {
     /** Атакует только выбранную цель (моба под прицелом). */
     TARGET("target"),
     /** По очереди атакует всех мобов в радиусе 50 блоков вокруг владельца. */
-    ALL("all");
+    ALL("all"),
+    /** Кружит у владельца и сбивает тех, кто на него напал, целится в него или подобрался близко. */
+    GUARD("guard");
 
     public static final Codec<ArrowMode> CODEC = StringIdentifiable.createCodec(ArrowMode::values);
 
@@ -24,7 +26,8 @@ public enum ArrowMode implements StringIdentifiable {
     }
 
     public ArrowMode next() {
-        return this == TARGET ? ALL : TARGET;
+        ArrowMode[] modes = values();
+        return modes[(this.ordinal() + 1) % modes.length];
     }
 
     public String translationKey() {

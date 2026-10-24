@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
@@ -38,6 +39,7 @@ import net.minecraft.stat.Stats;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
@@ -251,6 +253,64 @@ public class OlegusArrowGameTests implements FabricGameTest {
                 () -> {
                     arrow.discard();
                     friends.forEach(Entity::discard);
+                });
+    }
+
+    /** «Охрана» сбивает враждебного моба рядом с владельцем, но не трогает свинью и далёкого хаска. */
+    @GameTest(templateName = ARENA, batchId = "olegus_guard_near", tickLimit = 600)
+    public void guardModeStrikesNearbyHostiles(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity near = spawnStillHusk(context, at(5, 2, 5));
+        // Угол арены: дальше радиуса охраны (12), но в пределах погони (32).
+        HuskEntity far = spawnStillHusk(context, at(14, 2, 14));
+        PigEntity pig = spawnStill(context, EntityType.PIG, at(-2, 2, 4));
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.GUARD, null);
+        succeedWhen(context, 600, 100, () -> !near.isAlive() && arrow.getStatus() == OlegusArrowEntity.STATUS_WAITING,
+                () -> {
+                    context.assertTrue(far.getHealth() == far.getMaxHealth(), "Охрана погналась за далёким хаском");
+                    context.assertTrue(pig.getHealth() == pig.getMaxHealth(), "Охрана тронула свинью");
+                }, () -> describe(context, arrow) + " | рядом " + describe(context, near) + " | далеко " + describe(context, far),
+                () -> {
+                    arrow.discard();
+                    far.discard();
+                    pig.discard();
+                });
+    }
+
+    /** «Охрана» достаёт и далёкого моба, если он напал на владельца. */
+    @GameTest(templateName = ARENA, batchId = "olegus_guard_attacker", tickLimit = 600)
+    public void guardModeDefendsAgainstAttacker(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity attacker = spawnStillHusk(context, at(14, 2, 14));
+        owner.setAttacker(attacker);
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.GUARD, null);
+        succeedWhen(context, 600, 100, () -> !attacker.isAlive(), arrow::discard,
+                () -> describe(context, arrow) + " | напавший " + describe(context, attacker), () -> { });
+    }
+
+    /** Владелец ударил моба — ждущая цели стрела приходит на помощь. */
+    @GameTest(templateName = ARENA, batchId = "olegus_assist", tickLimit = 600)
+    public void attackingMobCallsWaitingArrow(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity enemy = spawnStillHusk(context, at(6, 2, 5));
+        HuskEntity bystander = spawnStillHusk(context, at(-4, 2, 6));
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.TARGET, null);
+        context.waitAndRun(10, () -> AttackEntityCallback.EVENT.invoker().interact(owner, world, Hand.MAIN_HAND, enemy, null));
+        succeedWhen(context, 600, 100, () -> !enemy.isAlive(),
+                () -> context.assertTrue(bystander.getHealth() == bystander.getMaxHealth(), "Стрела задела не того"),
+                () -> describe(context, arrow) + " | враг " + describe(context, enemy),
+                () -> {
+                    arrow.discard();
+                    bystander.discard();
                 });
     }
 

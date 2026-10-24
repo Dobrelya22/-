@@ -11,12 +11,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
+import net.minecraft.util.ActionResult;
 
 /** Серверная сторона управления: режим, указание цели и свист. */
 public final class ArrowControl {
@@ -30,6 +32,16 @@ public final class ArrowControl {
 
     public static void init() {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> syncMode(handler.getPlayer()));
+        // Ударили моба сами — свободная стрела приходит на помощь.
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (!world.isClient() && player instanceof ServerPlayerEntity serverPlayer && entity instanceof MobEntity mob
+                    && TargetRules.isValidTarget(mob, serverPlayer, OlegusArrowEntity.SEARCH_RADIUS)) {
+                for (OlegusArrowEntity arrow : findArrows(serverPlayer)) {
+                    arrow.assist(mob);
+                }
+            }
+            return ActionResult.PASS;
+        });
         // Игрок вышел — стрела возвращается в инвентарь до сохранения его данных, чтобы не потеряться.
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.getPlayer();

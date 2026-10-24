@@ -266,6 +266,19 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.rescanCooldown = 0;
     }
 
+    /**
+     * Владелец ударил моба — свободная стрела бросается помогать. Занятую охотой стрелу это
+     * не отвлекает.
+     */
+    public boolean assist(MobEntity target) {
+        if (this.phase != Phase.ACTIVE || this.targetUuid != null) {
+            return false;
+        }
+        this.unreachable.remove(target.getUuid());
+        this.setArrowTarget(target);
+        return true;
+    }
+
     /** Указать цель. В режиме «все мобы» она атакуется первой, затем охота продолжается. */
     public boolean designate(MobEntity target) {
         if (this.phase == Phase.FINALE) {
@@ -506,14 +519,21 @@ public class OlegusArrowEntity extends ProjectileEntity {
     @Nullable
     private MobEntity updateTarget(ServerWorld world, PlayerEntity owner) {
         MobEntity target = this.getArrowTarget(world);
-        double leash = this.mode == ArrowMode.ALL ? SEARCH_RADIUS : TARGET_LEASH;
+        double leash = switch (this.mode) {
+            case TARGET -> TARGET_LEASH;
+            case ALL -> SEARCH_RADIUS;
+            case GUARD -> TargetRules.GUARD_CHASE_RADIUS;
+        };
         if (target != null && !TargetRules.isValidTarget(target, owner, leash)) {
             this.clearTarget();
             target = null;
         }
-        if (target == null && this.mode == ArrowMode.ALL && this.rescanCooldown <= 0) {
-            this.rescanCooldown = 10;
-            target = TargetRules.findNextTarget(world, owner, this, SEARCH_RADIUS, this.unreachable.keySet());
+        if (target == null && this.mode != ArrowMode.TARGET && this.rescanCooldown <= 0) {
+            // «Охрана» осматривается чаще: опасность рядом с владельцем.
+            this.rescanCooldown = this.mode == ArrowMode.GUARD ? 4 : 10;
+            target = this.mode == ArrowMode.GUARD
+                    ? TargetRules.findGuardTarget(world, owner, this.unreachable.keySet())
+                    : TargetRules.findNextTarget(world, owner, this, SEARCH_RADIUS, this.unreachable.keySet());
             if (target != null) {
                 this.setArrowTarget(target);
             }
@@ -640,7 +660,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     /** Плавно доворачивает скорость к цели, не превышая угловую скорость за тик. */
     private void steer(ServerWorld world, Vec3d center, Plan plan) {
         Vec3d waypoint = this.navigate(world, center, plan.destination());
-        if (this.pathFailed && plan.target() != null && this.mode == ArrowMode.ALL) {
+        if (this.pathFailed && plan.target() != null && this.mode != ArrowMode.TARGET) {
             // До цели не добраться — откладываем её и берём следующую.
             this.unreachable.put(plan.target().getUuid(), UNREACHABLE_TICKS);
             this.clearTarget();

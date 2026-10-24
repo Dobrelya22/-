@@ -18,6 +18,9 @@ public final class ClientArrowState {
     @Nullable
     private static OlegusArrowEntity activeArrow;
     private static boolean hasArrowItem;
+    private static int trackedArrowId = -1;
+    private static int trackedKills;
+    private static long killedAt = LONG_AGO;
 
     private ClientArrowState() {
     }
@@ -52,6 +55,12 @@ public final class ClientArrowState {
         return Math.round((client.world.getTime() + client.getRenderTickCounter().getTickDelta(false)) * 50.0);
     }
 
+    /** Миллисекунды с последней победы стрелы — счётчик на миг подсвечивается. */
+    public static long millisSinceKill() {
+        long since = gameMillis() - killedAt;
+        return since >= 0L ? since : Long.MAX_VALUE;
+    }
+
     @Nullable
     public static OlegusArrowEntity activeArrow() {
         return activeArrow;
@@ -74,6 +83,7 @@ public final class ClientArrowState {
                 activeArrow = arrow;
             }
         }
+        trackKills();
         PlayerInventory inventory = client.player.getInventory();
         for (int slot = 0; slot < inventory.size(); slot++) {
             if (inventory.getStack(slot).isOf(ModItems.OLEGUS_ARROW)) {
@@ -83,9 +93,25 @@ public final class ClientArrowState {
         }
     }
 
+    private static void trackKills() {
+        if (activeArrow == null) {
+            trackedArrowId = -1;
+            return;
+        }
+        int kills = activeArrow.getKills();
+        if (activeArrow.getId() != trackedArrowId) {
+            trackedArrowId = activeArrow.getId();
+        } else if (kills > trackedKills) {
+            killedAt = gameMillis();
+        }
+        trackedKills = kills;
+    }
+
     public static void reset() {
         mode = ArrowMode.TARGET;
         modeChangedAt = LONG_AGO;
+        killedAt = LONG_AGO;
+        trackedArrowId = -1;
         activeArrow = null;
         hasArrowItem = false;
     }

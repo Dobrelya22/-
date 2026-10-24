@@ -7,6 +7,7 @@
   "key.olegus_arrow.whistle": "Свистнуть (отозвать стрелу)",
   "mode.olegus_arrow.target": "Выбранная цель",
   "mode.olegus_arrow.all": "Все мобы (50 бл.)",
+  "mode.olegus_arrow.guard": "Охрана (12 бл.)",
   "hud.olegus_arrow.seconds": "%s с",
   "hud.olegus_arrow.waiting": "ждёт цель",
   "hud.olegus_arrow.returning": "возвращается",

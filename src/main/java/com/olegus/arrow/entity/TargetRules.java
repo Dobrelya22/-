@@ -5,7 +5,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.Tameable;
+import net.minecraft.entity.mob.AbstractPiglinEntity;
+import net.minecraft.entity.mob.Angerable;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.entity.passive.AbstractHorseEntity;
@@ -30,6 +33,10 @@ public final class TargetRules {
     public static final int CROWD_THRESHOLD = 3;
     public static final double CROWD_RADIUS = 10.0;
     public static final double MAX_CROWD_SPEED_MULTIPLIER = 2.0;
+    /** «Охрана»: враждебные мобы ближе этого к владельцу сбиваются, даже если ещё не напали. */
+    public static final double GUARD_RADIUS = 12.0;
+    /** «Охрана»: тех, кто напал или целится во владельца, стрела достаёт и дальше — до этого радиуса. */
+    public static final double GUARD_CHASE_RADIUS = 32.0;
     /** Насколько далеко от линии взгляда ещё «доводится» прицел. */
     private static final double AIM_ASSIST_RADIANS = Math.toRadians(8.0);
 
@@ -155,6 +162,45 @@ public final class TargetRules {
             }
         }
         return best;
+    }
+
+    /**
+     * Следующая цель «охраны»: прежде всего тот, кто только что ударил владельца, затем те, кто
+     * в него целится, затем враждебные мобы ближе {@link #GUARD_RADIUS}; из равных — ближайший
+     * к владельцу. Нейтральных (эндерменов, пиглинов, зомби-пиглинов) стрела не задирает, пока
+     * они сами не нападут.
+     */
+    @Nullable
+    public static MobEntity findGuardTarget(ServerWorld world, PlayerEntity owner, Set<UUID> excluded) {
+        LivingEntity attacker = owner.getAttacker();
+        if (attacker instanceof MobEntity mob && !excluded.contains(mob.getUuid())
+                && isValidTarget(mob, owner, GUARD_CHASE_RADIUS)) {
+            return mob;
+        }
+        MobEntity best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (MobEntity mob : world.getEntitiesByClass(MobEntity.class, owner.getBoundingBox().expand(GUARD_CHASE_RADIUS),
+                candidate -> !excluded.contains(candidate.getUuid()) && isValidTarget(candidate, owner, GUARD_CHASE_RADIUS))) {
+            double distance = mob.squaredDistanceTo(owner);
+            double score;
+            if (mob.getTarget() == owner) {
+                score = distance;
+            } else if (distance <= GUARD_RADIUS * GUARD_RADIUS && isThreat(mob) && isAutoTarget(mob, owner, GUARD_RADIUS)) {
+                score = distance + GUARD_CHASE_RADIUS * GUARD_CHASE_RADIUS;
+            } else {
+                continue;
+            }
+            if (score < bestScore) {
+                best = mob;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    /** Враждебный моб, которого не нужно ждать: нейтральные нападают, только если их разозлить. */
+    private static boolean isThreat(MobEntity mob) {
+        return mob instanceof Monster && !(mob instanceof Angerable) && !(mob instanceof AbstractPiglinEntity);
     }
 
     /** Сколько подходящих мобов толпится вокруг цели (включая её саму). */

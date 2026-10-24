@@ -19,6 +19,7 @@ import net.minecraft.util.math.MathHelper;
 public final class ArrowHud {
     private static final String ICON = "➶";
     private static final long MODE_FLASH_MILLIS = 600L;
+    private static final long KILL_FLASH_MILLIS = 500L;
     private static final int BAR_WIDTH = 81;
 
     private ArrowHud() {
@@ -70,15 +71,21 @@ public final class ArrowHud {
     private static Text line(OlegusArrowEntity arrow, long now) {
         ArrowMode mode = ClientArrowState.mode();
         boolean flash = ClientArrowState.millisSinceModeChange() < MODE_FLASH_MILLIS;
-        Formatting modeColor = flash ? Formatting.WHITE : mode == ArrowMode.TARGET ? Formatting.GOLD : Formatting.LIGHT_PURPLE;
+        Formatting modeColor = flash ? Formatting.WHITE : switch (mode) {
+            case TARGET -> Formatting.GOLD;
+            case ALL -> Formatting.LIGHT_PURPLE;
+            case GUARD -> Formatting.GREEN;
+        };
         MutableText line = Text.translatable(mode.translationKey()).formatted(modeColor);
         line.append(Text.literal(" [").append(Text.keybind(ArrowCommand.TOGGLE_MODE.keyTranslation())).append("]")
                 .formatted(Formatting.DARK_GRAY));
         if (arrow != null) {
             line.append(Text.literal("  ")).append(status(arrow, now));
             if (arrow.getKills() > 0) {
+                // Свежая победа на миг подсвечивает счётчик.
+                Formatting killColor = ClientArrowState.millisSinceKill() < KILL_FLASH_MILLIS ? Formatting.YELLOW : Formatting.RED;
                 line.append(Text.literal("  ")).append(
-                        Text.translatable("hud.olegus_arrow.kills", arrow.getKills()).formatted(Formatting.RED));
+                        Text.translatable("hud.olegus_arrow.kills", arrow.getKills()).formatted(killColor));
             }
         }
         return line;
