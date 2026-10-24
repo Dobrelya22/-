@@ -58,6 +58,12 @@ public class OlegusArrowDemo implements ClientModInitializer {
     private static final float VIEW_PITCH = 28.0F;
     /** Плавность поворота камеры: доля оставшегося угла за тик. */
     private static final float STEER_SMOOTHING = 0.12F;
+    /**
+     * Камера от третьего лица смотрит «сквозь» голову игрока, и то, за чем следим, оказалось бы
+     * прямо за его фигурой. Смещаем взгляд, чтобы бой был виден правее и выше игрока.
+     */
+    private static final float FOLLOW_YAW_OFFSET = -14.0F;
+    private static final float FOLLOW_PITCH_OFFSET = 7.0F;
 
     private record Step(int tick, Consumer<MinecraftClient> action) {
     }
@@ -297,9 +303,10 @@ public class OlegusArrowDemo implements ClientModInitializer {
             double dx = focus.x - eye.x;
             double dy = focus.y - eye.y;
             double dz = focus.z - eye.z;
-            wantYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+            wantYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0) + FOLLOW_YAW_OFFSET;
             wantPitch = MathHelper.clamp(
-                    (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))), 12.0F, 50.0F);
+                    (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))) + FOLLOW_PITCH_OFFSET,
+                    12.0F, 55.0F);
         }
         float yaw = player.getYaw() + MathHelper.wrapDegrees(wantYaw - player.getYaw()) * STEER_SMOOTHING;
         float pitch = player.getPitch() + (wantPitch - player.getPitch()) * STEER_SMOOTHING;

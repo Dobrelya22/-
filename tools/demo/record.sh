@@ -28,13 +28,13 @@ if pactl info >/dev/null 2>&1; then
   AUDIO=(-f pulse -i demo.monitor)
 fi
 
-RECORD_START=$(date +%s%3N)
 ffmpeg -loglevel error -y -f x11grab -video_size 1280x720 -framerate 30 -i :99 "${AUDIO[@]}" \
   -c:v libx264 -preset ultrafast -crf 18 -c:a aac -b:a 160k "$OUT/raw.mkv" &
 FFMPEG=$!
 
 timeout 1200 ./gradlew --no-daemon runDemo || echo "runDemo завершился с ошибкой"
 
+STOP_TIME=$(date +%s%3N)
 kill -INT "$FFMPEG" 2>/dev/null || true
 wait "$FFMPEG" || true
 kill "$XVFB" 2>/dev/null || true
@@ -48,12 +48,15 @@ if ! grep -q '^end' run-demo/demo-markers.txt 2>/dev/null; then
 fi
 
 # Обрезаем загрузку игры: оставляем ровно сценарий (по отметкам, которые он пишет).
-read -r FROM LEN < <(python3 - "$RECORD_START" <<'PY'
+# ffmpeg начинает писать не сразу после запуска, поэтому момент начала записи считаем
+# от её остановки назад на длительность файла.
+RAW_DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/raw.mkv")
+read -r FROM LEN < <(python3 - "$STOP_TIME" "$RAW_DURATION" <<'PY'
 import sys
-record_start = int(sys.argv[1])
+capture_start = int(sys.argv[1]) - float(sys.argv[2]) * 1000
 marks = dict(line.split() for line in open("run-demo/demo-markers.txt"))
 start, end = int(marks["start"]), int(marks["end"])
-print(max(0.0, (start - record_start) / 1000 - 0.5), (end - start) / 1000 + 1.0)
+print(max(0.0, (start - capture_start) / 1000 - 0.5), (end - start) / 1000 + 1.0)
 PY
 )
 ffmpeg -loglevel error -y -ss "$FROM" -i "$OUT/raw.mkv" -t "$LEN" \
