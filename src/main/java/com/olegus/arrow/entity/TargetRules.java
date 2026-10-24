@@ -1,5 +1,6 @@
 package com.olegus.arrow.entity;
 
+import com.olegus.arrow.registry.ModGameRules;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -7,6 +8,11 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.Tameable;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.Monster;
+import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.AllayEntity;
+import net.minecraft.entity.passive.IronGolemEntity;
+import net.minecraft.entity.passive.MerchantEntity;
+import net.minecraft.entity.passive.SnowGolemEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.hit.BlockHitResult;
@@ -48,6 +54,34 @@ public final class TargetRules {
             return false;
         }
         return !mob.hasPassenger(owner) && !owner.hasPassenger(mob);
+    }
+
+    /**
+     * Цель, которую стрела выбирает сама в режиме «все мобы». Кроме общих правил, она не трогает
+     * «своих»: жителей и торговцев, железных и снежных големов, тихонь, любых приручённых, мобов
+     * с именем и привязанных поводком. Указать такого моба целью вручную по-прежнему можно.
+     * Отключается правилом olegusArrowSparesFriends.
+     */
+    public static boolean isAutoTarget(Entity entity, PlayerEntity owner, double radius) {
+        if (!isValidTarget(entity, owner, radius)) {
+            return false;
+        }
+        if (!owner.getWorld().getGameRules().getBoolean(ModGameRules.SPARES_FRIENDS)) {
+            return true;
+        }
+        return !isFriend((MobEntity) entity);
+    }
+
+    public static boolean isFriend(MobEntity mob) {
+        if (mob instanceof MerchantEntity || mob instanceof IronGolemEntity || mob instanceof SnowGolemEntity
+                || mob instanceof AllayEntity) {
+            return true;
+        }
+        if (mob instanceof Tameable tameable && tameable.getOwnerUuid() != null
+                || mob instanceof AbstractHorseEntity horse && horse.isTame()) {
+            return true;
+        }
+        return mob.hasCustomName() || mob.isLeashed();
     }
 
     /** Моб под прицелом игрока, с небольшой доводкой, если прицел чуть промахнулся. */
@@ -103,7 +137,7 @@ public final class TargetRules {
         MobEntity best = null;
         double bestScore = Double.MAX_VALUE;
         for (MobEntity mob : world.getEntitiesByClass(MobEntity.class, owner.getBoundingBox().expand(radius),
-                candidate -> isValidTarget(candidate, owner, radius) && !excluded.contains(candidate.getUuid()))) {
+                candidate -> isAutoTarget(candidate, owner, radius) && !excluded.contains(candidate.getUuid()))) {
             Vec3d center = mob.getBoundingBox().getCenter();
             double score = center.squaredDistanceTo(from);
             if (!(mob instanceof Monster)) {
@@ -128,7 +162,7 @@ public final class TargetRules {
         Box area = target.getBoundingBox().expand(CROWD_RADIUS);
         return world.getEntitiesByClass(MobEntity.class, area,
                 mob -> mob.squaredDistanceTo(target) <= CROWD_RADIUS * CROWD_RADIUS
-                        && isValidTarget(mob, owner, searchRadius)).size();
+                        && isAutoTarget(mob, owner, searchRadius)).size();
     }
 
     /**

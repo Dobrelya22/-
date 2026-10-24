@@ -53,9 +53,10 @@ public final class ArrowHud {
 
     /** Радужная полоска оставшегося времени шириной с полоску здоровья; в последние 5 секунд мигает. */
     private static void drawTimeBar(DrawContext context, int x, int y, OlegusArrowEntity arrow, long now) {
-        int remaining = Math.max(0, OlegusArrowEntity.ACTIVE_TICKS - arrow.getSyncedLife());
-        int filled = Math.round(BAR_WIDTH * remaining / (float) OlegusArrowEntity.ACTIVE_TICKS);
-        boolean warning = remaining <= OlegusArrowEntity.ACTIVE_TICKS - OlegusArrowEntity.WARNING_TICK;
+        int total = arrow.getMaxLife();
+        int remaining = Math.max(0, total - arrow.getSyncedLife());
+        int filled = Math.round(BAR_WIDTH * remaining / (float) total);
+        boolean warning = remaining <= OlegusArrowEntity.WARNING_LEAD_TICKS;
         boolean blinkOn = (now / 250L) % 2L == 0L;
         context.fill(x - 1, y - 1, x + BAR_WIDTH + 1, y + 3, 0x90000000);
         for (int i = 0; i < filled; i++) {
@@ -84,7 +85,7 @@ public final class ArrowHud {
     }
 
     private static Text status(OlegusArrowEntity arrow, long now) {
-        int remainingTicks = Math.max(0, OlegusArrowEntity.ACTIVE_TICKS - arrow.getSyncedLife());
+        int remainingTicks = Math.max(0, arrow.getMaxLife() - arrow.getSyncedLife());
         int seconds = MathHelper.ceil(remainingTicks / 20.0F);
         return switch (arrow.getStatus()) {
             case OlegusArrowEntity.STATUS_RETURNING ->

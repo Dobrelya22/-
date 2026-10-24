@@ -5,8 +5,11 @@ import com.olegus.arrow.OlegusArrowMod;
 import com.olegus.arrow.entity.ArrowPathfinder;
 import com.olegus.arrow.entity.OlegusArrowEntity;
 import com.olegus.arrow.entity.TargetRules;
+import com.olegus.arrow.registry.ModAdvancements;
 import com.olegus.arrow.registry.ModEntities;
+import com.olegus.arrow.registry.ModGameRules;
 import com.olegus.arrow.registry.ModItems;
+import com.olegus.arrow.registry.ModStats;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
@@ -15,18 +18,26 @@ import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HuskEntity;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.passive.IronGolemEntity;
 import net.minecraft.entity.passive.PigEntity;
+import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.stat.Stats;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
@@ -203,9 +214,88 @@ public class OlegusArrowGameTests implements FabricGameTest {
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.ALL, null);
         context.waitAndRun(10, arrow::recall);
-        succeedWhen(context, 200, arrow::isRemoved,
-                () -> context.assertTrue(countArrows(owner.getInventory()) == 1, "Стрела не оказалась в инвентаре"),
-                () -> describe(context, arrow));
+        succeedWhen(context, 200, arrow::isRemoved, () -> {
+            context.assertTrue(countItems(owner.getInventory(), ModItems.OLEGUS_ARROW) == 1, "Стрела не оказалась в инвентаре");
+            context.assertTrue(ModAdvancements.isDone(owner, ModAdvancements.LAUNCH), "Нет достижения за запуск");
+        }, () -> describe(context, arrow));
+    }
+
+    /** «Все мобы» не трогают жителя, голема, чужого питомца и моба с именем, но указать их вручную можно. */
+    @GameTest(templateName = ARENA, batchId = "olegus_friends", tickLimit = 600)
+    public void allModeSparesFriends(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        HuskEntity husk = spawnStillHusk(context, at(6, 2, 6));
+        VillagerEntity villager = spawnStill(context, EntityType.VILLAGER, at(-4, 2, 5));
+        IronGolemEntity golem = spawnStill(context, EntityType.IRON_GOLEM, at(5, 2, -3));
+        PigEntity named = spawnStill(context, EntityType.PIG, at(-2, 2, 8));
+        named.setCustomName(Text.literal("Хрюша"));
+        WolfEntity strangersDog = spawnStill(context, EntityType.WOLF, at(7, 2, 2));
+        strangersDog.setOwnerUuid(UUID.randomUUID());
+        List<MobEntity> friends = List.of(villager, golem, named, strangersDog);
+        for (MobEntity friend : friends) {
+            context.assertTrue(!TargetRules.isAutoTarget(friend, owner, 50.0), "Свой моб попал в охоту: " + describe(context, friend));
+            context.assertTrue(TargetRules.isValidTarget(friend, owner, 50.0), "Своего моба нельзя указать вручную: " + describe(context, friend));
+        }
+        context.assertTrue(TargetRules.isAutoTarget(husk, owner, 50.0), "Хаск должен быть целью");
+
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.ALL, null);
+        succeedWhen(context, 600, 100, () -> !husk.isAlive() && arrow.getStatus() == OlegusArrowEntity.STATUS_WAITING,
+                () -> {
+                    for (MobEntity friend : friends) {
+                        context.assertTrue(friend.getHealth() == friend.getMaxHealth(), "Стрела ранила своего: " + describe(context, friend));
+                    }
+                }, () -> describe(context, arrow) + " | хаск " + describe(context, husk),
+                () -> {
+                    arrow.discard();
+                    friends.forEach(Entity::discard);
+                });
+    }
+
+    /** Добыча сражённого моба прилетает в инвентарь владельца; победа идёт в статистику. */
+    @GameTest(templateName = ARENA, batchId = "olegus_loot", tickLimit = 600)
+    public void lootFliesToOwner(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        clearInventory(owner.getInventory());
+        HuskEntity husk = spawnStillHusk(context, at(6, 2, 6));
+        husk.equipStack(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND));
+        husk.setEquipmentDropChance(EquipmentSlot.MAINHAND, 2.0F);
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, ItemStack.EMPTY, ArrowMode.TARGET, husk);
+        succeedWhen(context, 600, 100, () -> !husk.isAlive() && countItems(owner.getInventory(), Items.DIAMOND) == 1,
+                () -> {
+                    int kills = owner.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(ModStats.ARROW_KILLS));
+                    context.assertTrue(kills == 1, "Победа не попала в статистику: " + kills);
+                    context.assertTrue(ModAdvancements.isDone(owner, ModAdvancements.LOOT), "Нет достижения за добычу");
+                },
+                () -> describe(context, arrow) + " | хаск " + describe(context, husk)
+                        + " | алмазов " + countItems(owner.getInventory(), Items.DIAMOND),
+                () -> {
+                    arrow.discard();
+                    clearInventory(owner.getInventory());
+                });
+    }
+
+    /** Правило olegusArrowDuration: короткий полёт кончается финалом и падением предметом. */
+    @GameTest(templateName = ARENA, batchId = "olegus_duration", tickLimit = 600)
+    public void durationRuleShortensFlight(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        world.getGameRules().get(ModGameRules.DURATION).set(10, world.getServer());
+        ServerPlayerEntity owner = createOwner(context);
+        OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
+                ArrowMode.ALL, null);
+        context.assertTrue(arrow.getMaxLife() == 10 * 20, "Длительность из правила не применилась: " + arrow.getMaxLife());
+        Box around = owner.getBoundingBox().expand(8.0);
+        succeedWhen(context, 600, 100, arrow::isRemoved, () -> {
+            List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, around,
+                    item -> item.getStack().isOf(ModItems.OLEGUS_ARROW));
+            context.assertTrue(!drops.isEmpty(), "Стрела не упала предметом");
+            drops.forEach(ItemEntity::discard);
+        }, () -> describe(context, arrow), () -> world.getGameRules().get(ModGameRules.DURATION).set(40, world.getServer()));
     }
 
     @GameTest(templateName = ARENA, batchId = "olegus_orphan")
@@ -308,9 +398,13 @@ public class OlegusArrowGameTests implements FabricGameTest {
     }
 
     private static HuskEntity spawnStillHusk(TestContext context, BlockPos pos) {
-        HuskEntity husk = context.spawnEntity(EntityType.HUSK, pos);
-        husk.setAiDisabled(true);
-        return husk;
+        return spawnStill(context, EntityType.HUSK, pos);
+    }
+
+    private static <T extends MobEntity> T spawnStill(TestContext context, EntityType<T> type, BlockPos pos) {
+        T mob = context.spawnEntity(type, pos);
+        mob.setAiDisabled(true);
+        return mob;
     }
 
     private static void clearInventory(PlayerInventory inventory) {
@@ -319,10 +413,10 @@ public class OlegusArrowGameTests implements FabricGameTest {
         }
     }
 
-    private static int countArrows(PlayerInventory inventory) {
+    private static int countItems(PlayerInventory inventory, Item item) {
         int count = 0;
         for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(ModItems.OLEGUS_ARROW)) {
+            if (inventory.getStack(slot).isOf(item)) {
                 count += inventory.getStack(slot).getCount();
             }
         }

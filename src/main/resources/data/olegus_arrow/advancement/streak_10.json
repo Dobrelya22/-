@@ -1,0 +1,23 @@
+{
+  "parent": "olegus_arrow:launch",
+  "display": {
+    "icon": {
+      "id": "minecraft:iron_sword"
+    },
+    "title": {
+      "translate": "advancements.olegus_arrow.streak_10.title"
+    },
+    "description": {
+      "translate": "advancements.olegus_arrow.streak_10.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

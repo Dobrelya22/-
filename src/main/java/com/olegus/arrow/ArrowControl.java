@@ -4,6 +4,7 @@ import com.olegus.arrow.entity.OlegusArrowEntity;
 import com.olegus.arrow.entity.TargetRules;
 import com.olegus.arrow.network.ArrowCommand;
 import com.olegus.arrow.network.ModeSyncPayload;
+import com.olegus.arrow.registry.ModAdvancements;
 import com.olegus.arrow.registry.ModAttachments;
 import com.olegus.arrow.registry.ModSounds;
 import java.util.HashMap;
@@ -85,8 +86,12 @@ public final class ArrowControl {
         LAST_WHISTLE.put(player.getUuid(), now);
         player.getWorld().playSound(null, player.getX(), player.getEyeY(), player.getZ(), ModSounds.WHISTLE,
                 SoundCategory.PLAYERS, 2.0F, 0.95F + player.getRandom().nextFloat() * 0.1F);
+        boolean recalled = false;
         for (OlegusArrowEntity arrow : findArrows(player)) {
-            arrow.recall();
+            recalled |= arrow.recall();
+        }
+        if (recalled) {
+            ModAdvancements.grant(player, ModAdvancements.WHISTLE);
         }
     }
 

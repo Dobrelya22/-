@@ -1,10 +1,14 @@
 package com.olegus.arrow.entity;
 
 import com.olegus.arrow.ArrowMode;
+import com.olegus.arrow.LootDelivery;
 import com.olegus.arrow.Rainbow;
+import com.olegus.arrow.registry.ModAdvancements;
 import com.olegus.arrow.registry.ModDamageTypes;
 import com.olegus.arrow.registry.ModEntities;
+import com.olegus.arrow.registry.ModGameRules;
 import com.olegus.arrow.registry.ModSounds;
+import com.olegus.arrow.registry.ModStats;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -44,14 +48,14 @@ import org.joml.Vector3f;
 
 /**
  * Стрела Олегуса. Летит сама, плавно поворачивает, облетает препятствия и раз за разом
- * пронзает мобов. Через 40 секунд кружит вокруг владельца и падает предметом; на свист
- * отвечает и возвращается в инвентарь.
+ * пронзает мобов. Через 40 секунд (правило olegusArrowDuration) кружит вокруг владельца
+ * и падает предметом; на свист отвечает и возвращается в инвентарь.
  */
 public class OlegusArrowEntity extends ProjectileEntity {
-    /** Активная фаза длится 40 секунд. */
+    /** Активная фаза по умолчанию длится 40 секунд; правило olegusArrowDuration это меняет. */
     public static final int ACTIVE_TICKS = 40 * 20;
     /** За 5 секунд до конца звенит колокольчик. */
-    public static final int WARNING_TICK = ACTIVE_TICKS - 5 * 20;
+    public static final int WARNING_LEAD_TICKS = 5 * 20;
     /** Радиус охоты вокруг владельца. */
     public static final double SEARCH_RADIUS = 50.0;
 
@@ -74,7 +78,6 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private static final double FINALE_ORBIT_RADIUS = 1.8;
     /** Насколько вперёд по окружности целится кружащая стрела. */
     private static final double ORBIT_LEAD_RADIANS = 0.8;
-    private static final float DAMAGE = 8.0F;
     private static final float HUNT_TURN_DEGREES = 14.0F;
     private static final float CLOSE_TURN_DEGREES = 40.0F;
     private static final int HIT_COOLDOWN = 10;
@@ -106,6 +109,9 @@ public class OlegusArrowEntity extends ProjectileEntity {
             DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
     private static final TrackedData<Integer> KILLS =
             DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
+    /** Сколько тиков длится активная фаза этой стрелы — для полоски времени на клиенте. */
+    private static final TrackedData<Integer> MAX_LIFE =
+            DataTracker.registerData(OlegusArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
 
     private enum Phase { ACTIVE, RETURNING, FINALE }
 
@@ -119,6 +125,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     /** Предмет, которым стрела снова станет; пустой, если её выпустили в творческом режиме. */
     private ItemStack stack = ItemStack.EMPTY;
     private int life;
+    private int maxLife = ACTIVE_TICKS;
     private int finaleTicks;
     private int circleTicks;
     @Nullable
@@ -132,6 +139,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private int crowdCheckCooldown;
     private double crowdMultiplier = 1.0;
     private double speedMultiplier = 1.0;
+    private boolean boostAnnounced;
 
     @Nullable
     private List<BlockPos> path;
@@ -160,6 +168,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
                                            ArrowMode mode, @Nullable MobEntity target) {
         OlegusArrowEntity arrow = new OlegusArrowEntity(ModEntities.OLEGUS_ARROW, world);
         arrow.configure(owner.getUuid(), stack, mode);
+        arrow.setMaxLife(world.getGameRules().getInt(ModGameRules.DURATION) * 20);
         arrow.setOwner(owner);
         Vec3d look = owner.getRotationVec(1.0F);
         Vec3d center = owner.getEyePos().add(look.multiply(0.8));
@@ -174,6 +183,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         world.spawnEntity(arrow);
         world.playSound(null, center.x, center.y, center.z, ModSounds.LAUNCH, SoundCategory.PLAYERS, 1.0F, 1.0F);
         rainbowBurst(world, center, 5, 0.15);
+        ModAdvancements.grant(owner, ModAdvancements.LAUNCH);
         return arrow;
     }
 
@@ -191,6 +201,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         builder.add(BOOST, 1.0F);
         builder.add(TARGET_ID, -1);
         builder.add(KILLS, 0);
+        builder.add(MAX_LIFE, ACTIVE_TICKS);
     }
 
     // ---------------------------------------------------------------- состояние для клиента и команд
@@ -206,6 +217,20 @@ public class OlegusArrowEntity extends ProjectileEntity {
     /** Сколько тиков прошло в активной фазе (на клиенте обновляется раз в несколько тиков). */
     public int getSyncedLife() {
         return this.dataTracker.get(LIFE);
+    }
+
+    /** Сколько тиков длится активная фаза этой стрелы. */
+    public int getMaxLife() {
+        return this.dataTracker.get(MAX_LIFE);
+    }
+
+    private void setMaxLife(int ticks) {
+        this.maxLife = Math.max(WARNING_LEAD_TICKS * 2, ticks);
+        this.dataTracker.set(MAX_LIFE, this.maxLife);
+    }
+
+    private int warningTick() {
+        return this.maxLife - WARNING_LEAD_TICKS;
     }
 
     public byte getStatus() {
@@ -247,7 +272,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
             return false;
         }
         if (this.phase == Phase.RETURNING) {
-            if (this.life >= ACTIVE_TICKS) {
+            if (this.life >= this.maxLife) {
                 return false;
             }
             this.phase = Phase.ACTIVE;
@@ -258,14 +283,15 @@ public class OlegusArrowEntity extends ProjectileEntity {
         return true;
     }
 
-    /** Свист: стрела отвечает, бросает атаку и летит к владельцу. */
-    public void recall() {
+    /** Свист: стрела отвечает, бросает атаку и летит к владельцу. Возвращает, послушалась ли она. */
+    public boolean recall() {
         if (this.isRemoved() || this.phase == Phase.RETURNING) {
-            return;
+            return false;
         }
         this.phase = Phase.RETURNING;
         this.clearTarget();
         this.respondDelay = RESPOND_DELAY;
+        return true;
     }
 
     /** Кладёт стрелу в инвентарь владельца (или под ноги, если места нет) и убирает сущность. */
@@ -380,11 +406,11 @@ public class OlegusArrowEntity extends ProjectileEntity {
     @Nullable
     private Plan planHunt(ServerWorld world, ServerPlayerEntity owner) {
         this.life++;
-        if (this.life % LIFE_SYNC_INTERVAL == 0 || this.life >= WARNING_TICK) {
+        if (this.life % LIFE_SYNC_INTERVAL == 0 || this.life >= this.warningTick()) {
             this.dataTracker.set(LIFE, this.life);
         }
         this.ringWarningBell(world, owner);
-        if (this.life >= ACTIVE_TICKS) {
+        if (this.life >= this.maxLife) {
             this.enterFinale();
             return this.planFinale(world, owner);
         }
@@ -427,7 +453,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     }
 
     private void ringWarningBell(ServerWorld world, PlayerEntity owner) {
-        int sinceWarning = this.life - WARNING_TICK;
+        int sinceWarning = this.life - this.warningTick();
         if (sinceWarning != 0 && sinceWarning != 5 && sinceWarning != 10) {
             return;
         }
@@ -470,13 +496,9 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private static void rainbowBurst(ServerWorld world, Vec3d at, int perColor, double spread) {
         float start = world.getRandom().nextFloat();
         for (int i = 0; i < 4; i++) {
-            DustParticleEffect dust = new DustParticleEffect(toColor(Rainbow.hsvToRgb(start + i * 0.25F, 0.85F, 1.0F)), 1.2F);
+            DustParticleEffect dust = new DustParticleEffect(Rainbow.toVector(Rainbow.hsvToRgb(start + i * 0.25F, 0.85F, 1.0F)), 1.2F);
             world.spawnParticles(dust, at.x, at.y, at.z, perColor, spread, spread, spread, 0.0);
         }
-    }
-
-    private static Vector3f toColor(int rgb) {
-        return new Vector3f(((rgb >> 16) & 0xFF) / 255.0F, ((rgb >> 8) & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F);
     }
 
     // ---------------------------------------------------------------- цели
@@ -528,7 +550,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.resetPath();
     }
 
-    private void updateCrowdBoost(ServerWorld world, PlayerEntity owner, @Nullable MobEntity target) {
+    private void updateCrowdBoost(ServerWorld world, ServerPlayerEntity owner, @Nullable MobEntity target) {
         if (target == null) {
             this.crowdMultiplier = 1.0;
         } else if (--this.crowdCheckCooldown <= 0) {
@@ -539,6 +561,10 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.speedMultiplier = MathHelper.clamp(
                 this.speedMultiplier + (this.crowdMultiplier - this.speedMultiplier) * 0.15,
                 1.0, TargetRules.MAX_CROWD_SPEED_MULTIPLIER);
+        if (!this.boostAnnounced && this.speedMultiplier >= TargetRules.MAX_CROWD_SPEED_MULTIPLIER - 0.05) {
+            this.boostAnnounced = true;
+            ModAdvancements.grant(owner, ModAdvancements.BOOST);
+        }
     }
 
     /** Точка удара с небольшим упреждением по движению цели. */
@@ -568,7 +594,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.hitCooldown = HIT_COOLDOWN;
         // Урон постоянный и не зависит от скорости — в том числе от ускорения в толпе.
         DamageSource source = ModDamageTypes.arrow(world, this, owner);
-        boolean damaged = target.damage(source, DAMAGE);
+        boolean damaged = target.damage(source, world.getGameRules().getInt(ModGameRules.DAMAGE));
         Vec3d center = target.getBoundingBox().getCenter();
         if (damaged) {
             world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), SoundEvents.ENTITY_ARROW_HIT,
@@ -578,16 +604,31 @@ public class OlegusArrowEntity extends ProjectileEntity {
         }
         if (!target.isAlive()) {
             if (damaged) {
-                this.dataTracker.set(KILLS, this.getKills() + 1);
-                world.spawnParticles(ParticleTypes.FIREWORK, center.x, center.y, center.z, 14, 0.2, 0.2, 0.2, 0.12);
-                rainbowBurst(world, center, 6, 0.35);
-                // Звонкое «дзынь», как при попадании из лука, — сигнал владельцу о победе.
-                world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), SoundEvents.ENTITY_ARROW_HIT_PLAYER,
-                        SoundCategory.PLAYERS, 0.5F, 1.0F);
+                this.onKill(world, owner, target, center);
             }
             this.clearTarget();
             this.rescanCooldown = 0;
         }
+    }
+
+    private void onKill(ServerWorld world, ServerPlayerEntity owner, MobEntity target, Vec3d center) {
+        int kills = this.getKills() + 1;
+        this.dataTracker.set(KILLS, kills);
+        world.spawnParticles(ParticleTypes.FIREWORK, center.x, center.y, center.z, 14, 0.2, 0.2, 0.2, 0.12);
+        rainbowBurst(world, center, 6, 0.35);
+        // Звонкое «дзынь», как при попадании из лука, — сигнал владельцу о победе.
+        world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), SoundEvents.ENTITY_ARROW_HIT_PLAYER,
+                SoundCategory.PLAYERS, 0.5F, 1.0F);
+        owner.incrementStat(ModStats.ARROW_KILLS);
+        if (kills == 10) {
+            ModAdvancements.grant(owner, ModAdvancements.STREAK_10);
+        } else if (kills == 25) {
+            ModAdvancements.grant(owner, ModAdvancements.STREAK_25);
+        }
+        if (!owner.canSee(target)) {
+            ModAdvancements.grant(owner, ModAdvancements.UNSEEN_KILL);
+        }
+        LootDelivery.deliver(world, target.getBoundingBox(), owner);
     }
 
     private static boolean segmentTouches(Box box, Vec3d from, Vec3d to) {
@@ -797,7 +838,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
             Vec3d delta = current.subtract(last);
             for (int i = 0; i < 2; i++) {
                 Vec3d point = last.add(delta.multiply(this.random.nextDouble()));
-                Vector3f color = toColor(Rainbow.hsvToRgb(this.random.nextFloat(), 0.75F, 1.0F));
+                Vector3f color = Rainbow.toVector(Rainbow.hsvToRgb(this.random.nextFloat(), 0.75F, 1.0F));
                 world.addParticle(new DustParticleEffect(color, 0.7F),
                         point.x + this.random.nextGaussian() * 0.08, point.y + this.random.nextGaussian() * 0.08,
                         point.z + this.random.nextGaussian() * 0.08, 0.0, 0.0, 0.0);
@@ -868,6 +909,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         nbt.putString("Phase", this.phase.name());
         nbt.putString("Mode", this.mode.asString());
         nbt.putInt("Life", this.life);
+        nbt.putInt("MaxLife", this.maxLife);
         nbt.putInt("FinaleTicks", this.finaleTicks);
         nbt.putInt("CircleTicks", this.circleTicks);
         nbt.putInt("Kills", this.getKills());
@@ -888,6 +930,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
         this.mode = ArrowMode.byId(nbt.getString("Mode"));
         this.life = nbt.getInt("Life");
         this.dataTracker.set(LIFE, this.life);
+        this.setMaxLife(nbt.contains("MaxLife", NbtElement.INT_TYPE) ? nbt.getInt("MaxLife") : ACTIVE_TICKS);
         this.finaleTicks = nbt.getInt("FinaleTicks");
         this.circleTicks = nbt.getInt("CircleTicks");
         this.dataTracker.set(KILLS, nbt.getInt("Kills"));
