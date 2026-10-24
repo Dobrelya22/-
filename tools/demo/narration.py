@@ -17,7 +17,7 @@ from piper import PiperVoice
 # Ударения, которые espeak-ng ставит неверно: фонемы слова → исправленные.
 STRESS_FIXES = {"danʲˈik": "dˈanʲɪk"}
 # Средняя высота голоса после обработки — низкий баритон.
-TARGET_F0 = 95.0
+TARGET_F0 = 100.0
 # Формантам — чуть ниже, чем было: голос звучит грудным, а не «мультяшным».
 FORMANT_SHIFT = 0.94
 SENTENCE_PAUSE = 0.22
@@ -74,6 +74,9 @@ def median_f0(pcm, rate):
         if corr[0] <= 0:
             continue
         lag = low + int(np.argmax(corr[low:high]))
+        # Пик на двойном периоде — частая ошибка «на октаву ниже»: берём половинный, если он почти не хуже.
+        while lag // 2 >= low and corr[lag // 2] > 0.85 * corr[lag]:
+            lag //= 2
         if corr[lag] / corr[0] > 0.45:
             found.append(rate / lag)
     return float(np.median(found)) if found else 0.0
@@ -133,11 +136,28 @@ def main():
         i = int(at * rate)
         track[i:i + len(audio)] += audio
 
-    f0 = median_f0(track, rate)
-    pitch = min(1.0, max(0.7, TARGET_F0 / f0)) if f0 > 0 else 0.84
-    print(f"Голос: основной тон {f0:.0f} Гц, понижаю в {1 / pitch:.2f} раза")
     raw_path = args.out + ".raw.wav"
     write_wav(raw_path, track, rate)
+    f0 = median_f0(track, rate)
+    pitch = min(1.0, max(0.6, TARGET_F0 / f0)) if f0 > 0 else 0.8
+    print(f"Голос: основной тон {f0:.0f} Гц")
+    # Сдвиг высоты оценивается по готовому звуку и при необходимости уточняется.
+    for _ in range(3):
+        lower(raw_path, args.out, rate, pitch)
+        result, result_rate = read_wav(args.out)
+        result_f0 = median_f0(result, result_rate)
+        print(f"  понижение в {1 / pitch:.2f} раза → {result_f0:.0f} Гц")
+        if result_f0 <= 0 or abs(result_f0 / TARGET_F0 - 1.0) < 0.04:
+            break
+        corrected = min(1.0, max(0.6, pitch * TARGET_F0 / result_f0))
+        if corrected == pitch:
+            break
+        pitch = corrected
+    print(f"Готово: {args.out}, {len(result) / result_rate:.1f} с, основной тон {result_f0:.0f} Гц")
+
+
+def lower(source, out, rate, pitch):
+    """Баритон: ниже тон и чуть ниже форманты, плюс тёплый эквалайзер и компрессор."""
     chain = ",".join([
         f"asetrate={rate * FORMANT_SHIFT:.0f}",
         f"rubberband=tempo={1 / FORMANT_SHIFT:.5f}:pitch={pitch / FORMANT_SHIFT:.5f}:formant=preserved",
@@ -148,11 +168,8 @@ def main():
         "acompressor=threshold=0.12:ratio=3:attack=8:release=160:makeup=1.6",
         "alimiter=limit=0.89",
     ])
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", raw_path, "-af", chain, "-ac", "1",
-                    "-c:a", "pcm_s16le", args.out], check=True)
-    result, result_rate = read_wav(args.out)
-    print(f"Готово: {args.out}, {len(result) / result_rate:.1f} с, основной тон {median_f0(result, result_rate):.0f} Гц")
-
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", source, "-af", chain, "-ac", "1",
+                    "-c:a", "pcm_s16le", out], check=True)
 
 if __name__ == "__main__":
     sys.exit(main())
