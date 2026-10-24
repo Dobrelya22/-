@@ -1,0 +1,72 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Сначала только jar мода: его можно скачать, даже если тесты потом упадут.
+      - name: Сборка мода
+        run: ./gradlew remapJar --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: andryushka-arrow
+          path: build/libs/andryushka-arrow-*.jar
+
+      - name: Полная сборка
+        run: ./gradlew build --stacktrace
+
+      - name: Игровые тесты
+        run: ./gradlew runGametest --stacktrace
+
+      - name: Отчёт игровых тестов
+        if: failure()
+        run: cat build/gametest/report.xml || true
+
+  # Каждое обновление main с зелёными тестами выкладывает jar на страницу Releases.
+  # Версия — mod_version из gradle.properties, описание — её раздел в CHANGELOG.md.
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: andryushka-arrow
+          path: dist
+
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          {
+            awk -v v="$version" '/^## /{p = ($2 == v); next} p' CHANGELOG.md
+            echo
+            echo "**Установка:** положите \`andryushka-arrow-$version.jar\` и [Fabric API](https://modrinth.com/mod/fabric-api/versions?g=1.21.1) в папку \`.minecraft/mods\` и запустите Minecraft 1.21.1 с [Fabric Loader](https://fabricmc.net/use/) 0.16+."
+          } > notes.md
+          if gh release view "v$version" >/dev/null 2>&1; then
+            gh release upload "v$version" dist/*.jar --clobber
+            gh release edit "v$version" --notes-file notes.md
+          else
+            gh release create "v$version" dist/*.jar --target "$GITHUB_SHA" \
+              --title "Стрела Андрюшки $version" --notes-file notes.md
+          fi

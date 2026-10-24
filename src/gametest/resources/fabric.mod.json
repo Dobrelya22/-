@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "andryushka_arrow_gametest",
+  "version": "1.0.0",
+  "name": "Andryushka Arrow — game tests",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": ["com.andryushka.arrow.gametest.AndryushkaArrowGameTests"]
+  },
+  "depends": {
+    "andryushka_arrow": "*",
+    "fabric-gametest-api-v1": "*"
+  }
+}

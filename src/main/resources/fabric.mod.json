@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "andryushka_arrow",
+  "version": "${version}",
+  "name": "Стрела Андрюшки",
+  "description": "Волшебная самонаводящаяся стрела в духе стрелы Йонду: облетает препятствия, охотится на мобов, оставляет радужный след и возвращается на свист.",
+  "authors": ["Andryushka"],
+  "icon": "assets/andryushka_arrow/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.andryushka.arrow.AndryushkaArrowMod"],
+    "client": ["com.andryushka.arrow.client.AndryushkaArrowClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
