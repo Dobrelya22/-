@@ -8,7 +8,7 @@ skipMultiplayerWarning:true
 narrator:0
 fullscreen:false
 guiScale:2
-fov:0.0
+fov:-0.25
 bobView:false
 renderDistance:6
 simulationDistance:6

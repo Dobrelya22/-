@@ -62,8 +62,8 @@ jobs:
       - name: Ролик в логе
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          ffmpeg -loglevel error -y -i demo/olegus-arrow-demo.mp4 -vf scale=854:-2 -r 24 \
-            -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart small.mp4
+          ffmpeg -loglevel error -y -i demo/olegus-arrow-demo.mp4 -vf scale=960:-2 -r 30 \
+            -c:v libx264 -preset slow -crf 27 -pix_fmt yuv420p -c:a aac -b:a 112k -movflags +faststart small.mp4
           ls -l small.mp4
           echo "VIDEO-BEGIN $(stat -c %s small.mp4)"
           base64 -w 60000 small.mp4 | sed 's/^/VIDEO /'

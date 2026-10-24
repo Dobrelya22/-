@@ -2,6 +2,8 @@ package com.olegus.arrow.demo;
 
 import com.olegus.arrow.OlegusArrowMod;
 import com.olegus.arrow.client.ArrowKeyBindings;
+import com.olegus.arrow.client.ClientArrowState;
+import com.olegus.arrow.entity.OlegusArrowEntity;
 import com.olegus.arrow.registry.ModItems;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +25,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.option.Perspective;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.DataConfiguration;
@@ -51,8 +54,10 @@ public class OlegusArrowDemo implements ClientModInitializer {
     private static final Path MARKERS = Path.of("demo-markers.txt");
     private static final int WARMUP_TICKS = 80;
     /** Игрок висит над полем, камера — от третьего лица со спины. */
-    private static final Vec3d HOVER = new Vec3d(0.5, -54.0, -3.5);
-    private static final float VIEW_PITCH = 30.0F;
+    private static final Vec3d HOVER = new Vec3d(0.5, -56.5, -2.5);
+    private static final float VIEW_PITCH = 28.0F;
+    /** Плавность поворота камеры: доля оставшегося угла за тик. */
+    private static final float STEER_SMOOTHING = 0.12F;
 
     private record Step(int tick, Consumer<MinecraftClient> action) {
     }
@@ -65,6 +70,8 @@ public class OlegusArrowDemo implements ClientModInitializer {
     private float lookYaw;
     private float lookPitch = VIEW_PITCH;
     private boolean steering;
+    /** Пока стрела охотится, камера следит за ней и её целью. */
+    private boolean follow;
 
     @Override
     public void onInitializeClient() {
@@ -87,16 +94,18 @@ public class OlegusArrowDemo implements ClientModInitializer {
                     "gamerule doDaylightCycle false",
                     "gamerule doWeatherCycle false",
                     "gamerule doMobSpawning false",
+                    "gamerule announceAdvancements false",
+                    "kill @e[type=!minecraft:player]",
                     "time set 6000",
                     "weather clear",
                     "difficulty easy",
                     "gamemode survival @a",
                     "give @a olegus_arrow:olegus_arrow",
                     "tp @a " + HOVER.x + " " + HOVER.y + " " + HOVER.z + " 0 " + VIEW_PITCH,
-                    mob("husk", -4, 8, "Цель"),
-                    mob("husk", 4, 9, null),
-                    mob("pig", 1, 13, null),
-                    mob("sheep", -2, 15, null));
+                    mob("husk", -3, 5, "Цель"),
+                    mob("husk", 3, 6, null),
+                    mob("pig", 0, 9, null),
+                    mob("sheep", -1, 11, null));
             server(client, server -> {
                 // Выживание — чтобы были видны сердечки, но игрок висит в воздухе и неуязвим.
                 ServerPlayerEntity player = server.getPlayerManager().getPlayerList().get(0);
@@ -110,17 +119,20 @@ public class OlegusArrowDemo implements ClientModInitializer {
             this.caption = Text.literal("Стрела Олегуса — демонстрация мода");
         });
         at(3.0, client -> this.caption = Text.literal("Режим «Выбранная цель»: стрела бьёт только моба под прицелом"));
-        at(3.5, client -> this.lookAt(client, new Vec3d(-3.5, -59.0, 8.5)));
-        at(5.0, this::useArrow);
+        at(3.5, client -> this.lookAt(client, new Vec3d(-2.5, -59.0, 5.5)));
+        at(5.0, client -> {
+            this.useArrow(client);
+            this.follow = true;
+        });
         at(10.0, client -> {
             this.caption = Text.literal("Цель повержена. Остальных стрела не тронула и ждёт рядом");
             this.look(0.0F, VIEW_PITCH);
         });
         at(13.0, client -> {
             this.caption = Text.literal("Клавиша R — режим «Все мобы в радиусе 50 блоков»");
-            command(client, "fill 5 -60 18 15 -56 18 minecraft:stone_bricks");
+            command(client, "fill 2 -60 10 9 -57 10 minecraft:stone_bricks");
             for (int i = 0; i < 6; i++) {
-                command(client, mob("husk", 8 + (i % 3) * 2, 22 + (i / 3) * 2, null));
+                command(client, mob("husk", 3 + (i % 3) * 2, 13 + (i / 3) * 2, null));
             }
         });
         at(14.0, client -> press(ArrowKeyBindings.TOGGLE_MODE));
@@ -170,9 +182,9 @@ public class OlegusArrowDemo implements ClientModInitializer {
     /** Волны мобов, чтобы стрела была занята все 40 секунд. */
     private static void spawnWave(MinecraftClient client, int wave) {
         int[][] spots = {
-                {-10, 10}, {12, 6}, {-6, 20}, {6, 28}, {0, 34},
-                {-14, 24}, {16, 16}, {-3, 26}, {9, 3}, {-12, 4},
-                {14, 30}, {-8, 32}, {3, 20}, {-16, 14}, {18, 22},
+                {-7, 6}, {8, 4}, {-4, 12}, {6, 14}, {0, 17},
+                {-9, 13}, {10, 9}, {-2, 15}, {5, 2}, {-8, 3},
+                {9, 15}, {-6, 17}, {2, 12}, {-10, 8}, {11, 12},
         };
         for (int i = wave * 5; i < wave * 5 + 5; i++) {
             command(client, mob(i % 2 == 0 ? "husk" : "pig", spots[i][0], spots[i][1], null));
@@ -221,7 +233,9 @@ public class OlegusArrowDemo implements ClientModInitializer {
                 step.action().accept(client);
             }
         }
-        this.steer(client.player);
+        // Всплывающие «Новое достижение» загораживают кадр.
+        client.getToastManager().clear();
+        this.steer(client);
     }
 
     private static void createWorld(MinecraftClient client) {
@@ -252,13 +266,34 @@ public class OlegusArrowDemo implements ClientModInitializer {
         this.look(yaw, pitch);
     }
 
-    /** Плавный поворот головы — чтобы в ролике не было рывков. */
-    private void steer(ClientPlayerEntity player) {
+    /**
+     * Плавный поворот головы — чтобы в ролике не было рывков. Пока стрела охотится, камера
+     * смотрит на середину между ней и её целью, иначе — на общий план поля.
+     */
+    private void steer(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
         if (!this.steering) {
             return;
         }
-        float yaw = player.getYaw() + MathHelper.wrapDegrees(this.lookYaw - player.getYaw()) * 0.15F;
-        float pitch = player.getPitch() + (this.lookPitch - player.getPitch()) * 0.15F;
+        float wantYaw = this.lookYaw;
+        float wantPitch = this.lookPitch;
+        OlegusArrowEntity arrow = ClientArrowState.activeArrow();
+        if (this.follow && arrow != null && arrow.getStatus() == OlegusArrowEntity.STATUS_HUNTING) {
+            Vec3d focus = arrow.getPos();
+            Entity target = client.world.getEntityById(arrow.getTargetId());
+            if (target != null) {
+                focus = focus.add(target.getPos()).multiply(0.5);
+            }
+            Vec3d eye = player.getEyePos();
+            double dx = focus.x - eye.x;
+            double dy = focus.y - eye.y;
+            double dz = focus.z - eye.z;
+            wantYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+            wantPitch = MathHelper.clamp(
+                    (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))), 12.0F, 50.0F);
+        }
+        float yaw = player.getYaw() + MathHelper.wrapDegrees(wantYaw - player.getYaw()) * STEER_SMOOTHING;
+        float pitch = player.getPitch() + (wantPitch - player.getPitch()) * STEER_SMOOTHING;
         player.setYaw(yaw);
         player.setPitch(pitch);
         player.setHeadYaw(yaw);
