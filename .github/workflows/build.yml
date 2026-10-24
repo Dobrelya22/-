@@ -32,3 +32,7 @@ jobs:
 
       - name: Игровые тесты
         run: ./gradlew runGametest --stacktrace
+
+      - name: Отчёт игровых тестов
+        if: failure()
+        run: cat build/gametest/report.xml || true
