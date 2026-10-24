@@ -1,0 +1,23 @@
+{
+  "parent": "andryushka_arrow:launch",
+  "display": {
+    "icon": {
+      "id": "minecraft:chest"
+    },
+    "title": {
+      "translate": "advancements.andryushka_arrow.loot.title"
+    },
+    "description": {
+      "translate": "advancements.andryushka_arrow.loot.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "display": {
+    "icon": {
+      "id": "andryushka_arrow:andryushka_arrow"
+    },
+    "title": {
+      "translate": "advancements.andryushka_arrow.root.title"
+    },
+    "description": {
+      "translate": "advancements.andryushka_arrow.root.description"
+    },
+    "background": "minecraft:textures/gui/advancements/backgrounds/adventure.png",
+    "frame": "task",
+    "show_toast": false,
+    "announce_to_chat": false,
+    "hidden": false
+  },
+  "criteria": {
+    "has_arrow": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "andryushka_arrow:andryushka_arrow"
+          }
+        ]
+      }
+    }
+  }
+}

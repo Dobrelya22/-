@@ -1,0 +1,29 @@
+{
+  "whistle": {
+    "subtitle": "subtitles.andryushka_arrow.whistle",
+    "sounds": [
+      "andryushka_arrow:whistle"
+    ]
+  },
+  "respond": {
+    "subtitle": "subtitles.andryushka_arrow.respond",
+    "sounds": [
+      "andryushka_arrow:respond"
+    ]
+  },
+  "launch": {
+    "subtitle": "subtitles.andryushka_arrow.launch",
+    "sounds": [
+      "andryushka_arrow:launch"
+    ]
+  },
+  "flight": {
+    "subtitle": "subtitles.andryushka_arrow.flight",
+    "sounds": [
+      {
+        "name": "andryushka_arrow:flight",
+        "attenuation_distance": 24
+      }
+    ]
+  }
+}

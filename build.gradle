@@ -29,11 +29,11 @@ sourceSets.demo.output.resourcesDir = sourceSets.demo.java.destinationDirectory.
 
 loom {
     mods {
-        'olegus_arrow' {
+        'andryushka_arrow' {
             sourceSet sourceSets.main
             sourceSet sourceSets.client
         }
-        'olegus_arrow_gametest' {
+        'andryushka_arrow_gametest' {
             sourceSet sourceSets.gametest
         }
     }
@@ -53,7 +53,7 @@ loom {
             client()
             name 'Demo'
             source sourceSets.demo
-            vmArg '-Dolegus.demo=true'
+            vmArg '-Dandryushka.demo=true'
             programArgs '--width', '1280', '--height', '720'
             runDir 'run-demo'
         }

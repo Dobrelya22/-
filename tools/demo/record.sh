@@ -16,7 +16,7 @@ DILATION=${DEMO_DILATION:-15}
 CAPTURE_FPS=${DEMO_CAPTURE_FPS:-10}
 mkdir -p "$OUT" run-demo
 rm -f run-demo/demo-markers.txt run-demo/demo-sounds.txt
-rm -rf run-demo/saves/olegus-demo
+rm -rf run-demo/saves/andryushka-demo
 # Блеск зачарования анимируется по настоящим часам, а не по тикам — замедляем его вместе с игрой.
 {
   grep -v '^glintSpeed:' tools/demo/options.txt
@@ -28,8 +28,8 @@ rm -rf run-demo/saves/olegus-demo
 
 export DISPLAY=:99
 export LIBGL_ALWAYS_SOFTWARE=1
-OLEGUS_DEMO_TICK_RATE=$(python3 -c "print(20 / $DILATION)")
-export OLEGUS_DEMO_TICK_RATE
+ANDRYUSHKA_DEMO_TICK_RATE=$(python3 -c "print(20 / $DILATION)")
+export ANDRYUSHKA_DEMO_TICK_RATE
 Xvfb :99 -screen 0 1280x720x24 -nolisten tcp &
 XVFB=$!
 # Звуковая карта нужна игре, чтобы звуки «играли» и попадали в журнал; сама запись — без звука.
@@ -54,7 +54,7 @@ cp run-demo/demo-markers.txt run-demo/demo-sounds.txt "$OUT/" 2>/dev/null || tru
 if ! grep -q '^end' run-demo/demo-markers.txt 2>/dev/null; then
   echo "Сценарий не дошёл до конца — сохраняю сырую запись целиком"
   ffmpeg -loglevel error -y -i "$OUT/raw.mkv" -c:v libx264 -preset medium -crf 26 -pix_fmt yuv420p \
-    -movflags +faststart "$OUT/olegus-arrow-demo.mp4" || true
+    -movflags +faststart "$OUT/andryushka-arrow-demo.mp4" || true
   exit 1
 fi
 
@@ -91,10 +91,10 @@ if [ -n "$NARRATION" ] && [ -f "$NARRATION" ]; then
     "[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice][key];\
      [1:a]acompressor=threshold=0.05:ratio=4:attack=5:release=250,volume=1.4[game];[game][key]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=400[ducked];\
      [ducked][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[audio]" \
-    -map 0:v -map "[audio]" -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/olegus-arrow-demo.mp4"
+    -map 0:v -map "[audio]" -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/andryushka-arrow-demo.mp4"
 else
   ffmpeg -loglevel error -y -i "$OUT/video.mp4" -i "$OUT/sfx.wav" -map 0:v -map 1:a \
-    -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/olegus-arrow-demo.mp4"
+    -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/andryushka-arrow-demo.mp4"
 fi
 rm -f "$OUT/raw.mkv"
-echo "Ролик: $OUT/olegus-arrow-demo.mp4"
+echo "Ролик: $OUT/andryushka-arrow-demo.mp4"

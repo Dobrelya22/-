@@ -31,7 +31,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: olegus-arrow-narration
+          name: andryushka-arrow-narration
           path: narration.wav
 
   record:
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: olegus-arrow-narration
+          name: andryushka-arrow-narration
           path: narration
 
       - name: Запись ролика
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: olegus-arrow-demo
+          name: andryushka-arrow-demo
           path: build/demo/
 
       # Несколько кадров прямо в логе — чтобы проверить ролик, не скачивая его.
@@ -81,7 +81,7 @@ jobs:
         if: always()
         run: |
           for t in 1 5 12 16.5 19 24 29 32 34 39 46 53 57 63 70 76 81 85 88 90 95; do
-            if ffmpeg -loglevel error -y -ss "$t" -i build/demo/olegus-arrow-demo.mp4 -frames:v 1 \
+            if ffmpeg -loglevel error -y -ss "$t" -i build/demo/andryushka-arrow-demo.mp4 -frames:v 1 \
                  -vf scale=640:-2 -q:v 7 /tmp/frame.jpg; then
               echo "FRAME $t $(base64 -w0 /tmp/frame.jpg)"
             fi
@@ -89,7 +89,7 @@ jobs:
 
       - name: Журнал игры
         if: always()
-        run: grep -E "ERROR|Exception|olegus|Демо" build/demo/latest.log | head -150 || true
+        run: grep -E "ERROR|Exception|andryushka|Демо" build/demo/latest.log | head -150 || true
 
   # Облегчённая копия ролика текстом в логах: её можно забрать без доступа к хранилищу артефактов.
   compress:
@@ -98,17 +98,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: olegus-arrow-demo
+          name: andryushka-arrow-demo
           path: demo
 
       - name: Сжатие до 20 МБ
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 demo/olegus-arrow-demo.mp4)
+          duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 demo/andryushka-arrow-demo.mp4)
           video_kbps=$(python3 -c "print(int(20 * 8 * 1024 * 1024 / $duration / 1000) - 128)")
           for pass in 1 2; do
             output=small.mp4; [ "$pass" = 1 ] && output=/dev/null
-            ffmpeg -loglevel error -y -i demo/olegus-arrow-demo.mp4 -vf scale=960:-2 -r 60 \
+            ffmpeg -loglevel error -y -i demo/andryushka-arrow-demo.mp4 -vf scale=960:-2 -r 60 \
               -c:v libx264 -preset slow -b:v "${video_kbps}k" -pass "$pass" -pix_fmt yuv420p \
               -c:a aac -b:a 128k -movflags +faststart -f mp4 "$output"
           done
@@ -117,7 +117,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: olegus-arrow-demo-small
+          name: andryushka-arrow-demo-small
           path: small.mp4
 
   share:
@@ -129,7 +129,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: olegus-arrow-demo-small
+          name: andryushka-arrow-demo-small
 
       - name: Часть ролика в логе
         run: |

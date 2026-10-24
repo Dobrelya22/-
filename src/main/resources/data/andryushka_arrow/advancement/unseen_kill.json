@@ -1,0 +1,23 @@
+{
+  "parent": "andryushka_arrow:launch",
+  "display": {
+    "icon": {
+      "id": "minecraft:spyglass"
+    },
+    "title": {
+      "translate": "advancements.andryushka_arrow.unseen_kill.title"
+    },
+    "description": {
+      "translate": "advancements.andryushka_arrow.unseen_kill.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "id": "olegus_arrow_demo",
+  "id": "andryushka_arrow_demo",
   "version": "1.0.0",
-  "name": "Olegus Arrow — demo",
+  "name": "Andryushka Arrow — demo",
   "environment": "client",
   "entrypoints": {
-    "client": ["com.olegus.arrow.demo.OlegusArrowDemo"]
+    "client": ["com.andryushka.arrow.demo.AndryushkaArrowDemo"]
   },
   "depends": {
-    "olegus_arrow": "*"
+    "andryushka_arrow": "*"
   }
 }

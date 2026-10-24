@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Генерирует текстуры, иконку и звуки мода «Стрела Олегуса».
+"""Генерирует текстуры, иконку и звуки мода «Стрела Андрюшки».
 
 Нужны Pillow, numpy и ffmpeg с libvorbis. Запуск из корня репозитория:
     python3 tools/generate_assets.py
@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "src/main/resources/assets/olegus_arrow"
+ASSETS = ROOT / "src/main/resources/assets/andryushka_arrow"
 
 OUTLINE = (46, 4, 12, 255)
 DARK = (128, 14, 28, 255)
@@ -68,7 +68,7 @@ def add_outline(px, size: int) -> None:
 def model_texture() -> Image.Image:
     """Текстура 64×32 для объёмной модели: каждой детали — своя область однотонного цвета.
 
-    Области совпадают с uv(...) в OlegusArrowRenderer.getTexturedModelData().
+    Области совпадают с uv(...) в AndryushkaArrowRenderer.getTexturedModelData().
     """
     img = Image.new("RGBA", (64, 32), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -285,10 +285,10 @@ def main() -> int:
     (ASSETS / "textures/entity").mkdir(parents=True, exist_ok=True)
     (ASSETS / "sounds").mkdir(parents=True, exist_ok=True)
 
-    item_texture().save(ASSETS / "textures/item/olegus_arrow.png")
-    model_texture().save(ASSETS / "textures/entity/olegus_arrow.png")
-    glow_texture().save(ASSETS / "textures/entity/olegus_arrow_glow.png")
-    trail_texture().save(ASSETS / "textures/entity/olegus_arrow_trail.png")
+    item_texture().save(ASSETS / "textures/item/andryushka_arrow.png")
+    model_texture().save(ASSETS / "textures/entity/andryushka_arrow.png")
+    glow_texture().save(ASSETS / "textures/entity/andryushka_arrow_glow.png")
+    trail_texture().save(ASSETS / "textures/entity/andryushka_arrow_trail.png")
     mod_icon().save(ASSETS / "icon.png")
 
     write_ogg(whistle(), ASSETS / "sounds/whistle.ogg")

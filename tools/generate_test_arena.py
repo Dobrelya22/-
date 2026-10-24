@@ -11,7 +11,7 @@ import gzip
 import struct
 from pathlib import Path
 
-TARGET = Path(__file__).resolve().parent.parent / "src/gametest/resources/data/olegus_arrow_gametest/structure/arena.nbt"
+TARGET = Path(__file__).resolve().parent.parent / "src/gametest/resources/data/andryushka_arrow_gametest/structure/arena.nbt"
 SIZE = (24, 12, 24)
 DATA_VERSION = 3955  # Minecraft 1.21.1
 
