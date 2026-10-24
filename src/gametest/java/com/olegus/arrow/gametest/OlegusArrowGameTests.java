@@ -32,11 +32,37 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
-/** Запуск: ./gradlew runGametest. Каждый тест в своей партии, чтобы стрелы не мешали друг другу. */
+/**
+ * Запуск: ./gradlew runGametest. Каждый тест в своей партии и на своей арене 24×12×24
+ * (tools/generate_test_arena.py), чтобы стрелы и мобы разных тестов не мешали друг другу.
+ */
 public class OlegusArrowGameTests implements FabricGameTest {
+    private static final String ARENA = "olegus_arrow_gametest:arena";
+    /** Координаты в тестах отсчитываются от середины арены по горизонтали. */
+    private static final int ARENA_CENTER = 8;
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_crowd")
+    private static BlockPos at(int x, int y, int z) {
+        return new BlockPos(x + ARENA_CENTER, y, z + ARENA_CENTER);
+    }
+
+    /**
+     * Тестовый сервер обновляет сущности только в принудительно загруженных чанках; стрела,
+     * вылетевшая за них, замирает. Загружаем чанки вокруг арены с запасом на её петли.
+     */
+    private static void prepareArena(TestContext context) {
+        BlockPos origin = context.getAbsolutePos(at(0, 0, 0));
+        int chunkX = origin.getX() >> 4;
+        int chunkZ = origin.getZ() >> 4;
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                context.getWorld().setChunkForced(chunkX + dx, chunkZ + dz, true);
+            }
+        }
+    }
+
+    @GameTest(templateName = ARENA, batchId = "olegus_crowd")
     public void crowdSpeedIsCappedAtDouble(TestContext context) {
+        prepareArena(context);
         context.assertTrue(TargetRules.crowdSpeedMultiplier(1) == 1.0, "Одиночная цель не должна ускорять");
         context.assertTrue(TargetRules.crowdSpeedMultiplier(3) == 1.0, "Три моба — ещё не толпа");
         context.assertTrue(TargetRules.crowdSpeedMultiplier(4) > 1.0, "Четыре моба — уже толпа");
@@ -44,10 +70,11 @@ public class OlegusArrowGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_path")
+    @GameTest(templateName = ARENA, batchId = "olegus_path")
     public void pathfinderFliesAroundWall(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
-        BlockPos base = context.getAbsolutePos(new BlockPos(0, 1, 0));
+        BlockPos base = context.getAbsolutePos(at(0, 1, 0));
         for (int y = 0; y <= 4; y++) {
             for (int z = 0; z <= 6; z++) {
                 world.setBlockState(base.add(3, y, z), Blocks.STONE.getDefaultState());
@@ -73,15 +100,16 @@ public class OlegusArrowGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_rules")
+    @GameTest(templateName = ARENA, batchId = "olegus_rules")
     public void onlyMobsAreTargets(TestContext context) {
+        prepareArena(context);
         PlayerEntity owner = context.createMockPlayer(GameMode.SURVIVAL);
         PlayerEntity stranger = context.createMockPlayer(GameMode.SURVIVAL);
-        owner.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(new BlockPos(1, 2, 1))));
-        stranger.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(new BlockPos(2, 2, 2))));
-        HuskEntity husk = context.spawnEntity(EntityType.HUSK, new BlockPos(3, 2, 3));
+        owner.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(at(1, 2, 1))));
+        stranger.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(at(2, 2, 2))));
+        HuskEntity husk = context.spawnEntity(EntityType.HUSK, at(3, 2, 3));
         husk.setAiDisabled(true);
-        WolfEntity pet = context.spawnEntity(EntityType.WOLF, new BlockPos(4, 2, 4));
+        WolfEntity pet = context.spawnEntity(EntityType.WOLF, at(4, 2, 4));
         pet.setAiDisabled(true);
         pet.setOwnerUuid(owner.getUuid());
 
@@ -95,13 +123,14 @@ public class OlegusArrowGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_hunt_all", tickLimit = 900)
+    @GameTest(templateName = ARENA, batchId = "olegus_hunt_all", tickLimit = 900)
     public void allModeKillsEveryMob(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
         ServerPlayerEntity owner = createOwner(context);
-        HuskEntity first = spawnStillHusk(context, new BlockPos(6, 2, 6));
-        HuskEntity second = spawnStillHusk(context, new BlockPos(-3, 2, 7));
-        PigEntity pig = context.spawnEntity(EntityType.PIG, new BlockPos(7, 2, -2));
+        HuskEntity first = spawnStillHusk(context, at(6, 2, 6));
+        HuskEntity second = spawnStillHusk(context, at(-3, 2, 7));
+        PigEntity pig = context.spawnEntity(EntityType.PIG, at(7, 2, -2));
         pig.setAiDisabled(true);
         float ownerHealth = owner.getHealth();
 
@@ -114,12 +143,13 @@ public class OlegusArrowGameTests implements FabricGameTest {
                 + describe(context, second) + " | свинья " + describe(context, pig));
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_hunt_one", tickLimit = 600)
+    @GameTest(templateName = ARENA, batchId = "olegus_hunt_one", tickLimit = 600)
     public void targetModeIgnoresOtherMobs(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
         ServerPlayerEntity owner = createOwner(context);
-        HuskEntity chosen = spawnStillHusk(context, new BlockPos(6, 2, 6));
-        HuskEntity bystander = spawnStillHusk(context, new BlockPos(-3, 2, 6));
+        HuskEntity chosen = spawnStillHusk(context, at(6, 2, 6));
+        HuskEntity bystander = spawnStillHusk(context, at(-3, 2, 6));
 
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.TARGET, chosen);
@@ -131,12 +161,13 @@ public class OlegusArrowGameTests implements FabricGameTest {
     }
 
     /** Цель за стеной до земли: стрела должна облететь её сверху или сбоку и добить цель. */
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_wall_target", tickLimit = 900)
+    @GameTest(templateName = ARENA, batchId = "olegus_wall_target", tickLimit = 900)
     public void targetBehindWallIsReached(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
         List<BlockPos> wall = buildWall(context, 4, -1, 6, -4, 10);
         ServerPlayerEntity owner = createOwner(context);
-        HuskEntity husk = spawnStillHusk(context, new BlockPos(8, 2, 3));
+        HuskEntity husk = spawnStillHusk(context, at(8, 2, 3));
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.TARGET, husk);
         succeedWhen(context, 900, 20, () -> !husk.isAlive(), arrow::discard,
@@ -145,14 +176,15 @@ public class OlegusArrowGameTests implements FabricGameTest {
     }
 
     /** Та же раскладка, что в охоте на всех, но с висящей стеной между игроком и частью мобов. */
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_wall_all", tickLimit = 900)
+    @GameTest(templateName = ARENA, batchId = "olegus_wall_all", tickLimit = 900)
     public void allModeFliesAroundWall(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
         List<BlockPos> wall = buildWall(context, 3, 1, 5, 0, 6);
         ServerPlayerEntity owner = createOwner(context);
-        HuskEntity first = spawnStillHusk(context, new BlockPos(6, 2, 6));
-        HuskEntity second = spawnStillHusk(context, new BlockPos(-3, 2, 7));
-        PigEntity pig = context.spawnEntity(EntityType.PIG, new BlockPos(7, 2, -2));
+        HuskEntity first = spawnStillHusk(context, at(6, 2, 6));
+        HuskEntity second = spawnStillHusk(context, at(-3, 2, 7));
+        PigEntity pig = context.spawnEntity(EntityType.PIG, at(7, 2, -2));
         pig.setAiDisabled(true);
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.ALL, null);
@@ -162,8 +194,9 @@ public class OlegusArrowGameTests implements FabricGameTest {
                 () -> removeBlocks(context, wall));
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_whistle", tickLimit = 200)
+    @GameTest(templateName = ARENA, batchId = "olegus_whistle", tickLimit = 200)
     public void whistleBringsArrowBack(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
         ServerPlayerEntity owner = createOwner(context);
         clearInventory(owner.getInventory());
@@ -175,10 +208,11 @@ public class OlegusArrowGameTests implements FabricGameTest {
                 () -> describe(context, arrow));
     }
 
-    @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_orphan")
+    @GameTest(templateName = ARENA, batchId = "olegus_orphan")
     public void ownerlessArrowDropsAsItem(TestContext context) {
+        prepareArena(context);
         ServerWorld world = context.getWorld();
-        Vec3d pos = Vec3d.ofCenter(context.getAbsolutePos(new BlockPos(1, 2, 1)));
+        Vec3d pos = Vec3d.ofCenter(context.getAbsolutePos(at(1, 2, 1)));
         OlegusArrowEntity arrow = new OlegusArrowEntity(ModEntities.OLEGUS_ARROW, world);
         arrow.setPosition(pos);
         arrow.configure(UUID.randomUUID(), new ItemStack(ModItems.OLEGUS_ARROW), ArrowMode.ALL);
@@ -239,7 +273,7 @@ public class OlegusArrowGameTests implements FabricGameTest {
         List<BlockPos> blocks = new java.util.ArrayList<>();
         for (int y = fromY; y <= toY; y++) {
             for (int z = fromZ; z <= toZ; z++) {
-                BlockPos pos = context.getAbsolutePos(new BlockPos(x, y, z));
+                BlockPos pos = context.getAbsolutePos(at(x, y, z));
                 context.getWorld().setBlockState(pos, Blocks.STONE.getDefaultState());
                 blocks.add(pos);
             }
@@ -254,7 +288,7 @@ public class OlegusArrowGameTests implements FabricGameTest {
     }
 
     private static String describe(TestContext context, Entity entity) {
-        BlockPos pos = entity.getBlockPos().subtract(context.getAbsolutePos(BlockPos.ORIGIN));
+        BlockPos pos = entity.getBlockPos().subtract(context.getAbsolutePos(at(0, 0, 0)));
         String base = EntityType.getId(entity.getType()).getPath() + "@" + pos.getX() + "," + pos.getY() + "," + pos.getZ()
                 + (entity.isRemoved() ? " удалён" : "");
         if (entity instanceof OlegusArrowEntity arrow) {
@@ -269,7 +303,7 @@ public class OlegusArrowGameTests implements FabricGameTest {
 
     private static ServerPlayerEntity createOwner(TestContext context) {
         ServerPlayerEntity owner = context.createMockCreativeServerPlayerInWorld();
-        owner.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(new BlockPos(1, 2, 1))));
+        owner.setPosition(Vec3d.ofBottomCenter(context.getAbsolutePos(at(1, 2, 1))));
         return owner;
     }
 

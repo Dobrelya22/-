@@ -78,6 +78,11 @@ public class OlegusArrowEntity extends ProjectileEntity {
     private static final float HUNT_TURN_DEGREES = 14.0F;
     private static final float CLOSE_TURN_DEGREES = 40.0F;
     private static final int HIT_COOLDOWN = 10;
+    /**
+     * Насколько близко к телу цели нужно пролететь, чтобы её пронзить. С запасом: моб,
+     * забившийся в угол или нору, всё равно достаётся стреле.
+     */
+    private static final double STRIKE_REACH = 0.75;
     private static final int RESPOND_DELAY = 8;
     private static final int UNREACHABLE_TICKS = 100;
     private static final int PATH_RECHECK_TICKS = 10;
@@ -557,7 +562,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
     }
 
     private void tryStrike(ServerWorld world, ServerPlayerEntity owner, MobEntity target, Vec3d from, Vec3d to) {
-        if (this.hitCooldown > 0 || !segmentTouches(target.getBoundingBox().expand(0.3), from, to)) {
+        if (this.hitCooldown > 0 || !segmentTouches(target.getBoundingBox().expand(STRIKE_REACH), from, to)) {
             return;
         }
         this.hitCooldown = HIT_COOLDOWN;
