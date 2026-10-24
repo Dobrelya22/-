@@ -18,14 +18,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Сборка
-        run: ./gradlew build --stacktrace
+      # Сначала только jar мода: его можно скачать, даже если тесты потом упадут.
+      - name: Сборка мода
+        run: ./gradlew remapJar --stacktrace
 
-      # Готовый мод выкладывается до тестов, чтобы его можно было скачать в любом случае.
       - uses: actions/upload-artifact@v4
         with:
           name: olegus-arrow
           path: build/libs/olegus-arrow-*.jar
+
+      - name: Полная сборка
+        run: ./gradlew build --stacktrace
 
       - name: Игровые тесты
         run: ./gradlew runGametest --stacktrace

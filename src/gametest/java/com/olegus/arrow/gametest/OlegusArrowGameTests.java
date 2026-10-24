@@ -8,6 +8,7 @@ import com.olegus.arrow.registry.ModEntities;
 import com.olegus.arrow.registry.ModItems;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -97,8 +98,7 @@ public class OlegusArrowGameTests implements FabricGameTest {
 
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.ALL, null);
-        context.succeedWhen(() -> {
-            context.assertTrue(!first.isAlive() && !second.isAlive() && !pig.isAlive(), "Не все мобы повержены");
+        succeedWhen(context, 900, () -> !first.isAlive() && !second.isAlive() && !pig.isAlive(), () -> {
             context.assertTrue(owner.getHealth() >= ownerHealth, "Стрела ранила владельца");
             arrow.discard();
         });
@@ -113,8 +113,7 @@ public class OlegusArrowGameTests implements FabricGameTest {
 
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.TARGET, chosen);
-        context.succeedWhen(() -> {
-            context.assertTrue(!chosen.isAlive(), "Выбранная цель ещё жива");
+        succeedWhen(context, 600, () -> !chosen.isAlive(), () -> {
             context.assertTrue(bystander.getHealth() == bystander.getMaxHealth(), "Стрела задела не ту цель");
             bystander.discard();
             arrow.discard();
@@ -129,10 +128,8 @@ public class OlegusArrowGameTests implements FabricGameTest {
         OlegusArrowEntity arrow = OlegusArrowEntity.launch(world, owner, new ItemStack(ModItems.OLEGUS_ARROW),
                 ArrowMode.ALL, null);
         context.waitAndRun(10, arrow::recall);
-        context.succeedWhen(() -> {
-            context.assertTrue(arrow.isRemoved(), "Стрела не вернулась на свист");
-            context.assertTrue(countArrows(owner.getInventory()) == 1, "Стрела не оказалась в инвентаре");
-        });
+        succeedWhen(context, 200, arrow::isRemoved,
+                () -> context.assertTrue(countArrows(owner.getInventory()) == 1, "Стрела не оказалась в инвентаре"));
     }
 
     @GameTest(templateName = EMPTY_STRUCTURE, batchId = "olegus_orphan")
@@ -151,6 +148,24 @@ public class OlegusArrowGameTests implements FabricGameTest {
             drops.forEach(ItemEntity::discard);
             context.complete();
         });
+    }
+
+    /**
+     * Проверяет условие каждые 5 тиков; как только оно выполнилось — финальные проверки и успех.
+     * Проверки расписаны заранее: планировать новые задачи изнутри задачи теста небезопасно.
+     * Не дождались до tickLimit — тест падает по таймауту.
+     */
+    private static void succeedWhen(TestContext context, int tickLimit, BooleanSupplier condition, Runnable onSuccess) {
+        boolean[] done = {false};
+        for (int tick = 5; tick < tickLimit; tick += 5) {
+            context.waitAndRun(tick, () -> {
+                if (!done[0] && condition.getAsBoolean()) {
+                    done[0] = true;
+                    onSuccess.run();
+                    context.complete();
+                }
+            });
+        }
     }
 
     private static ServerPlayerEntity createOwner(TestContext context) {
