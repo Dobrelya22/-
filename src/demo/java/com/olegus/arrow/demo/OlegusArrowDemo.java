@@ -118,6 +118,8 @@ public class OlegusArrowDemo implements ClientModInitializer {
             this.look(0.0F, VIEW_PITCH);
             this.caption = Text.literal("Стрела Олегуса — демонстрация мода");
         });
+        // Животные, сгенерированные вместе с миром, убраны выше; убираем и выпавший с них лут.
+        at(0.2, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
         at(3.0, client -> this.caption = Text.literal("Режим «Выбранная цель»: стрела бьёт только моба под прицелом"));
         at(3.5, client -> this.lookAt(client, new Vec3d(-2.5, -59.0, 5.5)));
         at(5.0, client -> {
@@ -239,8 +241,15 @@ public class OlegusArrowDemo implements ClientModInitializer {
     }
 
     private static void createWorld(MinecraftClient client) {
+        // Правила сразу при создании: иначе за время загрузки успевают появиться слизни,
+        // и стрела в режиме «все мобы» улетает за ними к горизонту.
+        GameRules rules = new GameRules();
+        rules.get(GameRules.DO_MOB_SPAWNING).set(false, null);
+        rules.get(GameRules.DO_DAYLIGHT_CYCLE).set(false, null);
+        rules.get(GameRules.DO_WEATHER_CYCLE).set(false, null);
+        rules.get(GameRules.ANNOUNCE_ADVANCEMENTS).set(false, null);
         LevelInfo info = new LevelInfo("olegus-demo", GameMode.CREATIVE, false, Difficulty.EASY, true,
-                new GameRules(), DataConfiguration.SAFE_MODE);
+                rules, DataConfiguration.SAFE_MODE);
         client.createIntegratedServerLoader().createAndStart("olegus-demo", info,
                 new GeneratorOptions(20261024L, false, false),
                 registries -> registries.getWrapperOrThrow(RegistryKeys.WORLD_PRESET)
