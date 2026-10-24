@@ -212,6 +212,11 @@ public class OlegusArrowEntity extends ProjectileEntity {
         return this.dataTracker.get(BOOST);
     }
 
+    /** Id сущности, которую стрела сейчас преследует, или -1. */
+    public int getTargetId() {
+        return this.dataTracker.get(TARGET_ID);
+    }
+
     /** Сколько мобов стрела победила за этот полёт. */
     public int getKills() {
         return this.dataTracker.get(KILLS);
@@ -803,7 +808,7 @@ public class OlegusArrowEntity extends ProjectileEntity {
 
     /** Над текущей целью кружатся две красные искры — видно, кого стрела сейчас преследует. */
     private void spawnTargetMarker(World world) {
-        int targetId = this.dataTracker.get(TARGET_ID);
+        int targetId = this.getTargetId();
         if (targetId < 0 || this.age % 2 != 0) {
             return;
         }
