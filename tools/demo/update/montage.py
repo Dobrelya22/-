@@ -37,9 +37,12 @@ ROCK_LOOP = ROOT / "src/main/resources/assets/andryushka_arrow/sounds/combo_rock
 # Темп партий (tools/rock_sounds.py): бас полёта — 120 ударов в минуту, рок серии — 150.
 BASS_BEAT = 0.5
 ROCK_BEAT = 0.4
+# Где в кадре дубля с ударами стоит танк (камера там неподвижна).
+HITS_FOCUS = (770, 300)
 LOUDNESS = -15.0
-# Уровень звуков игры в сценах сравнения (RMS, дБ) — до общей нормализации громкости.
+# Громкость звуков игры в сценах сравнения (LUFS) — до общей нормализации ролика.
 GAME_LEVEL = -18.0
+VOICE_GAIN = 1.45
 
 # Цвета — RGB.
 FIRE = ((255, 226, 90), (255, 84, 36))
@@ -262,10 +265,10 @@ def grade(frame, mode, n):
     return frame
 
 
-def move(frame, zoom=1.0, dx=0.0, dy=0.0, angle=0.0):
+def move(frame, zoom=1.0, dx=0.0, dy=0.0, angle=0.0, center=(W / 2, H / 2)):
     if abs(zoom - 1.0) < 1e-4 and abs(dx) < 0.05 and abs(dy) < 0.05 and abs(angle) < 0.01:
         return frame
-    matrix = cv2.getRotationMatrix2D((W / 2, H / 2), angle, zoom)
+    matrix = cv2.getRotationMatrix2D(center, angle, zoom)
     matrix[0, 2] += dx
     matrix[1, 2] += dy
     return cv2.warpAffine(frame, matrix, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
@@ -399,6 +402,8 @@ class Segment:
     number: str = ""
     title: str = ""
     game_gain: float = 1.0
+    base_zoom: float = 1.0
+    zoom_at: tuple = (W / 2, H / 2)
     music_gain: float = 0.0
     shots: list = field(default_factory=list)
 
@@ -444,8 +449,11 @@ def plan(log, takes):
         Segment("clip", 24.6, 10.0, src=flight_src, badge=new + ("сочный бас",), glitch_in=True,
                 beats=beats(flight_loop, BASS_BEAT, flight_src, 10.0), beat_zoom=0.012),
         Segment("card", 34.6, 1.6, src=hits_src, number="02", title="УДАР", game_gain=0.0),
-        Segment("clip", 36.2, 7.0, src=hits_src, track="before", grade="old", badge=old + ("тук-тук",)),
+        # Танк стоит поодаль — обе версии чуть приближены к нему.
+        Segment("clip", 36.2, 7.0, src=hits_src, track="before", grade="old", badge=old + ("тук-тук",),
+                base_zoom=1.35, zoom_at=HITS_FOCUS),
         Segment("clip", 43.2, 10.0, src=hits_src, badge=new + ("гитарный удар",), glitch_in=True,
+                base_zoom=1.35, zoom_at=HITS_FOCUS,
                 hits=local(strikes_hits, hits_src, 10.0), hit_zoom=0.05, hit_shake=8.0,
                 flashes=local(strikes_hits, hits_src, 10.0), flash_alpha=0.1),
         Segment("card", 53.2, 1.6, src=streak_src, number="03", title="СЕРИИ", game_gain=0.0),
@@ -475,8 +483,7 @@ class Montage:
         levels = {}
         for segment in segments:
             if segment.kind == "clip" and segment.track == "after":
-                after = self.slice(self.tracks["after"], segment.src, segment.length)
-                levels[segment.src] = 20 * np.log10(np.sqrt(np.mean(after ** 2)) + 1e-9)
+                levels[segment.src] = loudness(self.slice(self.tracks["after"], segment.src, segment.length))
         for segment in segments:
             if segment.kind == "clip" and segment.src in levels:
                 segment.game_gain *= float(np.clip(10 ** ((GAME_LEVEL - levels[segment.src]) / 20), 0.5, 4.0))
@@ -544,15 +551,15 @@ class Montage:
         place(fx, impact(), 6.45, 0.7)
         voice = np.zeros((n, 2))
         voice[:min(n, len(self.voice))] = self.voice[:n]
-        mix = (game + music * 0.8) * ducking(voice)[:, None] + fx + voice * 1.15
+        mix = (game + music * 0.8) * ducking(voice)[:, None] + fx + voice * VOICE_GAIN
         mix = mix[:int(self.total * SR)]
         fade = int(1.2 * SR)
         mix[-fade:] *= np.linspace(1, 0, fade)[:, None]
         write_wav(path, mix)
-        loudness = measure_loudness(path)
-        mix = limit(mix * 10 ** ((LOUDNESS - loudness) / 20), -1.0)
+        measured = measure_loudness(path)
+        mix = limit(mix * 10 ** ((LOUDNESS - measured) / 20), -1.5)
         write_wav(path, mix)
-        print(f"Звук: {loudness:.1f} LUFS → {LOUDNESS} LUFS")
+        print(f"Звук: {measured:.1f} LUFS → {LOUDNESS} LUFS")
 
     # ------------------------------------------------------------ картинка
 
@@ -576,7 +583,7 @@ class Montage:
                 else:
                     frame = clips[0].next()
                 frame = getattr(self, "frame_" + segment.kind)(segment, frame, t, n, frame_no, equalizer)
-                frame = self.overlay_captions(frame, segment, frame_no / FPS)
+                frame = self.overlay_captions(frame, segment, segment.start + t)
                 encoder.stdin.write(frame.tobytes())
                 frame_no += 1
             for clip in clips:
@@ -587,11 +594,12 @@ class Montage:
         encoder.wait()
 
     def camera(self, segment, frame, t, n):
-        zoom = 1.0 + segment.beat_zoom * envelope(segment.beats, t) + segment.hit_zoom * envelope(segment.hits, t, 0.09)
+        zoom = segment.base_zoom * (1.0 + segment.beat_zoom * envelope(segment.beats, t)
+                                    + segment.hit_zoom * envelope(segment.hits, t, 0.09))
         shake = segment.hit_shake * envelope(segment.hits, t, 0.08)
         dx = shake * math.sin(t * 2 * math.pi * 23.0)
         dy = shake * math.cos(t * 2 * math.pi * 19.0)
-        return move(frame, zoom, dx, dy)
+        return move(frame, zoom, dx, dy, center=segment.zoom_at)
 
     def frame_hook(self, segment, frame, t, n, frame_no, _):
         frame = self.camera(segment, grade(frame, "new", n), t, n)
@@ -783,6 +791,14 @@ def write_wav(path, audio):
         out.setsampwidth(2)
         out.setframerate(SR)
         out.writeframes((np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
+
+
+def loudness(audio):
+    """Громкость на слух (LUFS) без стробирования: K-фильтр из ITU-R BS.1770 для 48 кГц."""
+    shelf = signal.lfilter([1.53512485958697, -2.69169618940638, 1.19839281085285],
+                           [1.0, -1.69065929318241, 0.73248077421585], audio, axis=0)
+    weighted = signal.lfilter([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621], shelf, axis=0)
+    return -0.691 + 10 * math.log10(float(np.sum(np.mean(weighted ** 2, axis=0))) + 1e-12)
 
 
 def measure_loudness(path):
