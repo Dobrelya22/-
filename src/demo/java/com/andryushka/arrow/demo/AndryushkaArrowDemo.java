@@ -25,6 +25,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.advancement.AdvancementEntry;
 import net.minecraft.block.Blocks;
@@ -140,6 +141,12 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
     private float panTo;
     private int panStart = -1;
     private int panTicks;
+    /** Куда смотрит камера на прошлом и на этом тике; между ними угол считается в каждом кадре. */
+    private float cameraYaw;
+    private float cameraPitch;
+    private float prevCameraYaw;
+    private float prevCameraPitch;
+    private boolean cameraReady;
     private Tooltip tooltip = Tooltip.NONE;
     private PrintWriter soundLog;
     /** После конца сценария журнал не трогаем: повторное открытие стёрло бы его. */
@@ -157,6 +164,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         this.writeScript();
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
         HudRenderCallback.EVENT.register(this::renderOverlay);
+        WorldRenderEvents.START.register(context -> this.applyCamera());
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
                 ScreenEvents.afterRender(screen).register(this::renderScreenOverlay));
     }
@@ -251,7 +259,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
             client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
             client.inGameHud.getChatHud().clear(false);
             this.caption = Text.literal("Обзор мода «Стрела Андрюшки»");
-            this.look(-35.0F, 22.0F);
+            this.snapCamera(-35.0F, 22.0F);
         });
         on("hello", 0.0, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
         on("hello", 1.0, client -> this.pan(-35.0F, 35.0F, 26.0));
@@ -547,12 +555,13 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                 player.sendAbilitiesUpdate();
             });
             this.caption = Text.literal("Спасибо за просмотр!");
-            this.look(-30.0F, 10.0F);
+            this.look(-30.0F, 6.0F);
         });
         on("outro", 0.5, client -> this.pan(-30.0F, 30.0F, 28.0));
+        // Подальше и пониже — чтобы салют целиком помещался в кадр.
         for (int i = 0; i < 6; i++) {
             int x = -8 + i * 3;
-            on("outro2", i * 1.4, client -> command(client, firework(x, 10 + (x % 2) * 3)));
+            on("outro2", i * 1.4, client -> command(client, firework(x, 17 + Math.abs(x % 2) * 3)));
         }
     }
 
@@ -572,7 +581,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
 
     private static String firework(int x, int z) {
         return "summon minecraft:firework_rocket " + (x + 0.5) + " " + (GROUND + 1) + " " + (z + 0.5)
-                + " {LifeTime:28,FireworksItem:{id:\"minecraft:firework_rocket\",count:1,components:{"
+                + " {LifeTime:22,FireworksItem:{id:\"minecraft:firework_rocket\",count:1,components:{"
                 + "\"minecraft:fireworks\":{flight_duration:1,explosions:[{shape:\"large_ball\","
                 + "colors:[I;16711680,16760576,65280,255,16711935],has_twinkle:1b,has_trail:1b}]}}}}";
     }
@@ -755,6 +764,8 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         rules.get(GameRules.DO_DAYLIGHT_CYCLE).set(false, null);
         rules.get(GameRules.DO_WEATHER_CYCLE).set(false, null);
         rules.get(GameRules.ANNOUNCE_ADVANCEMENTS).set(false, null);
+        // Ручной волк, убранный со сцены в пустоту, иначе напишет в чат «Волк выпал из мира».
+        rules.get(GameRules.SHOW_DEATH_MESSAGES).set(false, null);
         // Иначе в чате видно, как сценарий замедляет игру и раздаёт предметы.
         rules.get(GameRules.SEND_COMMAND_FEEDBACK).set(false, null);
         rules.get(GameRules.LOG_ADMIN_COMMANDS).set(false, null);
@@ -774,6 +785,14 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         this.lookPitch = pitch;
         this.steering = true;
         this.panStart = -1;
+    }
+
+    /** Сразу смотреть туда, без плавного поворота, — для первого кадра ролика. */
+    private void snapCamera(float yaw, float pitch) {
+        this.look(yaw, pitch);
+        this.cameraYaw = this.prevCameraYaw = yaw;
+        this.cameraPitch = this.prevCameraPitch = pitch;
+        this.cameraReady = true;
     }
 
     private void lookAt(MinecraftClient client, Vec3d target) {
@@ -804,6 +823,13 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         if (!this.steering || client.currentScreen != null) {
             return;
         }
+        if (!this.cameraReady) {
+            this.cameraYaw = player.getYaw();
+            this.cameraPitch = player.getPitch();
+            this.cameraReady = true;
+        }
+        this.prevCameraYaw = this.cameraYaw;
+        this.prevCameraPitch = this.cameraPitch;
         if (this.panStart >= 0) {
             float t = MathHelper.clamp((this.tick - this.panStart) / (float) this.panTicks, 0.0F, 1.0F);
             float eased = t * t * (3.0F - 2.0F * t);
@@ -827,12 +853,35 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                     (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))) + FOLLOW_PITCH_OFFSET,
                     12.0F, 55.0F);
         }
-        float yaw = player.getYaw() + MathHelper.wrapDegrees(wantYaw - player.getYaw()) * STEER_SMOOTHING;
-        float pitch = player.getPitch() + (wantPitch - player.getPitch()) * STEER_SMOOTHING;
+        this.cameraYaw += MathHelper.wrapDegrees(wantYaw - this.cameraYaw) * STEER_SMOOTHING;
+        this.cameraPitch += (wantPitch - this.cameraPitch) * STEER_SMOOTHING;
+    }
+
+    /**
+     * Камера своего игрока в Minecraft не сглаживается между тиками: поворот мышью и так приходит
+     * в каждом кадре. Поверни её сценарий раз в тик — в замедленной игре она шла бы ступеньками,
+     * 20 раз в секунду ролика. Поэтому угол между тиками считаем в каждом кадре сами (он вступает
+     * в силу со следующего кадра — на глаз это незаметно).
+     */
+    private void applyCamera() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        ClientPlayerEntity player = client.player;
+        if (!this.cameraReady || !this.steering || player == null || client.currentScreen != null) {
+            return;
+        }
+        float tickDelta = client.getRenderTickCounter().getTickDelta(true);
+        float yaw = MathHelper.lerpAngleDegrees(tickDelta, this.prevCameraYaw, this.cameraYaw);
+        float pitch = MathHelper.lerp(tickDelta, this.prevCameraPitch, this.cameraPitch);
         player.setYaw(yaw);
         player.setPitch(pitch);
         player.setHeadYaw(yaw);
         player.setBodyYaw(yaw);
+        // Фигура игрока рисуется между углами прошлого и этого тика — ставим оба, чтобы она
+        // поворачивалась вместе с камерой.
+        player.prevYaw = yaw;
+        player.prevPitch = pitch;
+        player.prevHeadYaw = yaw;
+        player.prevBodyYaw = yaw;
     }
 
     // ---------------------------------------------------------------- надписи поверх игры

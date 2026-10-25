@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       dilation:
-        description: 'Во сколько раз замедлить игру при записи (больше — плавнее, но дольше)'
-        default: '6'
+        description: 'Во сколько раз замедлить игру при записи (больше — дольше запись, а всплывающие достижения короче)'
+        default: '3'
       capture_fps:
-        description: 'Кадров в секунду при захвате экрана'
-        default: '12'
+        description: 'Кадров в секунду при захвате экрана (пусто — ровно 60 / замедление)'
+        default: ''
       publish:
         description: 'Выложить ролик в релиз «review»'
         type: boolean

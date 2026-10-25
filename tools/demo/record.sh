@@ -13,8 +13,10 @@ set -euo pipefail
 OUT=${1:-build/demo}
 NARRATION=${2:-}
 CUES=${3:-}
-DILATION=${DEMO_DILATION:-6}
-CAPTURE_FPS=${DEMO_CAPTURE_FPS:-12}
+DILATION=${DEMO_DILATION:-3}
+# По умолчанию ровно 60 / замедление: тогда каждый кадр ролика — отдельный кадр игры, без
+# пропусков и повторов при пересчёте в 60 кадров.
+CAPTURE_FPS=${DEMO_CAPTURE_FPS:-$(python3 -c "print(round(60 / $DILATION, 4))")}
 mkdir -p "$OUT" run-demo
 rm -f run-demo/demo-markers.txt run-demo/demo-sounds.txt
 rm -rf run-demo/saves/andryushka-demo
@@ -103,14 +105,20 @@ python3 tools/demo/sound_track.py run-demo/demo-sounds.txt run-demo/demo-markers
 if [ -n "$NARRATION" ] && [ -f "$NARRATION" ]; then
   # Голос поверх звуков игры; звуки приглушаются, пока говорит голос, а громкие (свист)
   # поджимаются компрессором, чтобы не перекрикивать голос.
-  ffmpeg -loglevel error -y -i "$OUT/video.mp4" -i "$OUT/sfx.wav" -i "$NARRATION" -filter_complex \
-    "[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice][key];\
-     [1:a]acompressor=threshold=0.05:ratio=4:attack=5:release=250,volume=1.4[game];[game][key]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=400[ducked];\
-     [ducked][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[audio]" \
-    -map 0:v -map "[audio]" -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/andryushka-arrow-demo.mp4"
+  ffmpeg -loglevel error -y -i "$OUT/sfx.wav" -i "$NARRATION" -filter_complex \
+    "[1:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice][key];\
+     [0:a]acompressor=threshold=0.05:ratio=4:attack=5:release=250,volume=1.4[game];[game][key]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=400[ducked];\
+     [ducked][voice]amix=inputs=2:duration=first:normalize=0[audio]" \
+    -map "[audio]" -c:a pcm_f32le "$OUT/mix.wav"
 else
-  ffmpeg -loglevel error -y -i "$OUT/video.mp4" -i "$OUT/sfx.wav" -map 0:v -map 1:a \
-    -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/andryushka-arrow-demo.mp4"
+  cp "$OUT/sfx.wav" "$OUT/mix.wav"
 fi
-rm -f "$OUT/raw.mkv"
+# Громкость как у роликов в сети: −16 LUFS, пики ограничителем не выше −1 дБ.
+LOUDNESS=$(ffmpeg -hide_banner -i "$OUT/mix.wav" -af ebur128 -f null - 2>&1 | grep -oP '^\s*I:\s+\K-?[0-9.]+' | tail -1 || true)
+GAIN=$(python3 -c "print(round(-16 - float('${LOUDNESS:--16}'), 2))")
+echo "Громкость смеси ${LOUDNESS} LUFS, усиление ${GAIN} дБ"
+ffmpeg -loglevel error -y -i "$OUT/video.mp4" -i "$OUT/mix.wav" -map 0:v -map 1:a \
+  -af "volume=${GAIN}dB,alimiter=limit=0.89:attack=2:release=60:level=0" \
+  -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUT/andryushka-arrow-demo.mp4"
+rm -f "$OUT/raw.mkv" "$OUT/mix.wav"
 echo "Ролик: $OUT/andryushka-arrow-demo.mp4"
