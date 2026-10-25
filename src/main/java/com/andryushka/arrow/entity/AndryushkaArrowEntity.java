@@ -690,9 +690,13 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         boolean damaged = target.damage(source, damage);
         Vec3d center = target.getBoundingBox().getCenter();
         if (damaged) {
-            // Гитарный «лязг» — один из четырёх аккордов, чуть разной высоты.
-            world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), ModSounds.STRIKE,
-                    SoundCategory.PLAYERS, 0.6F, 0.96F + this.random.nextFloat() * 0.08F);
+            // Гитара — один из восьми приёмов. Владелец слышит её у себя, как бы далеко ни был моб;
+            // остальные — там, где удар.
+            float pitch = 0.97F + this.random.nextFloat() * 0.06F;
+            world.playSound(owner, target.getX(), target.getBodyY(0.5), target.getZ(), ModSounds.STRIKE,
+                    SoundCategory.PLAYERS, 0.8F, pitch);
+            world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), ModSounds.STRIKE,
+                    SoundCategory.PLAYERS, 0.55F, pitch);
             world.spawnParticles(ParticleTypes.CRIT, center.x, center.y, center.z, 12, 0.25, 0.25, 0.25, 0.4);
             this.burst(world, to, 2, 0.1);
         }

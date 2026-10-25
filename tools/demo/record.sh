@@ -4,6 +4,8 @@
 #     tools/demo/record.sh [папка-для-результата] [озвучка.wav] [метки-озвучки.txt]
 # Нужны xvfb, pulseaudio, ffmpeg, Mesa, python3 с numpy. Сценарий ролика — src/demo,
 # озвучка и метки — tools/demo/narration.py. Без меток сценарий берёт секунды из narration.txt.
+# DEMO_SCENARIO=update снимает дубли апдейт-ролика (tools/demo/update-takes.txt) и, если задан
+# DEMO_OLD_FLIGHT (звук полёта 1.2.1), пишет ещё дорожку sfx-before.wav со звуками той версии.
 #
 # Программный OpenGL рисует лишь несколько кадров в секунду, поэтому игра идёт в DEMO_DILATION
 # раз медленнее (/tick rate), а запись потом ускоряется до 60 кадров в секунду. Звук собирается
@@ -11,6 +13,10 @@
 set -euo pipefail
 
 OUT=${1:-build/demo}
+SCENARIO=${DEMO_SCENARIO:-review}
+LINES=tools/demo/narration.txt
+[ "$SCENARIO" = update ] && LINES=tools/demo/update-takes.txt
+export ANDRYUSHKA_DEMO_SCENARIO=$SCENARIO
 NARRATION=${2:-}
 CUES=${3:-}
 DILATION=${DEMO_DILATION:-3}
@@ -38,13 +44,13 @@ if [ -n "$CUES" ] && [ -f "$CUES" ]; then
   export ANDRYUSHKA_DEMO_CUES
 fi
 # Сколько ждать игру: длина сценария × замедление плюс запас на загрузку.
-SCRIPT_SECONDS=$(python3 - "${ANDRYUSHKA_DEMO_CUES:-}" <<'PY'
+SCRIPT_SECONDS=$(python3 - "${ANDRYUSHKA_DEMO_CUES:-}" "$LINES" <<'PY'
 import sys
-path = sys.argv[1]
+path, lines = sys.argv[1], sys.argv[2]
 if path:
     ends = [float(line.split()[1]) for line in open(path) if line.startswith("end ")]
 else:
-    ends = [float(line.split()[0]) for line in open("tools/demo/narration.txt") if line.strip() and not line.startswith("#")]
+    ends = [float(line.split()[0]) for line in open(lines) if line.strip() and not line.startswith("#")]
 print(int(max(ends)) + 1)
 PY
 )
@@ -93,6 +99,8 @@ print(max(0.0, (start - capture_start) / 1000), (end - start) / 1000)
 PY
 )
 echo "Запись: начало сценария на ${FROM} с, длина ${LEN} с, замедление ×${DILATION}"
+# Замедление нужно, чтобы перевести время из журнала звуков во время ролика (монтаж апдейт-ролика).
+echo "$DILATION" > "$OUT/dilation.txt"
 ffmpeg -loglevel error -y -ss "$FROM" -t "$LEN" -i "$OUT/raw.mkv" \
   -vf "setpts=(PTS-STARTPTS)/$DILATION,fps=60,format=yuv420p" -an \
   -c:v libx264 -preset medium -crf 20 "$OUT/video.mp4"
@@ -101,6 +109,10 @@ DISTINCT=$(ffmpeg -hide_banner -t 120 -i "$OUT/video.mp4" -vf mpdecimate,showinf
 echo "Неповторяющихся кадров за первые 2 минуты: $DISTINCT из 7200"
 
 python3 tools/demo/sound_track.py run-demo/demo-sounds.txt run-demo/demo-markers.txt "$DILATION" "$OUT/sfx.wav"
+if [ -n "${DEMO_OLD_FLIGHT:-}" ]; then
+  python3 tools/demo/sound_track.py run-demo/demo-sounds.txt run-demo/demo-markers.txt "$DILATION" "$OUT/sfx-before.wav" \
+    --before --old-flight "$DEMO_OLD_FLIGHT"
+fi
 
 if [ -n "$NARRATION" ] && [ -f "$NARRATION" ]; then
   # Голос поверх звуков игры; звуки приглушаются, пока говорит голос, а громкие (свист)

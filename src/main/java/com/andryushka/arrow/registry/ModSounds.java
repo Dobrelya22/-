@@ -15,12 +15,21 @@ public final class ModSounds {
     public static final SoundEvent LAUNCH = register("launch");
     /** Бас-рифф, который тянется за стрелой в полёте (зацикленный). */
     public static final SoundEvent FLIGHT = register("flight");
-    /** Гитарный «лязг» при ударе по мобу. */
+    /** Гитара при ударе по мобу: один из восьми приёмов. */
     public static final SoundEvent STRIKE = register("strike");
     /** Драйвовый рок, пока идёт серия побед (зацикленный, только владельцу). */
     public static final SoundEvent COMBO_ROCK = register("combo_rock");
-    /** Визг соло-гитары на каждую победу серии. */
-    public static final SoundEvent COMBO_LICK = register("combo_lick");
+    /** Две соло-гитары поверх рока с четвёртой победы серии. */
+    public static final SoundEvent COMBO_ROCK_LEAD = register("combo_rock_lead");
+    /** Пауэр-метал на «неудержимую» серию. */
+    public static final SoundEvent COMBO_EPIC = register("combo_epic");
+    /** Финальный аккорд, когда серия кончилась. */
+    public static final SoundEvent COMBO_END = register("combo_end");
+    /** Гитарные фразы на вторую — пятую победу серии. */
+    public static final SoundEvent COMBO_LICK_2 = register("combo_lick2");
+    public static final SoundEvent COMBO_LICK_3 = register("combo_lick3");
+    public static final SoundEvent COMBO_LICK_4 = register("combo_lick4");
+    public static final SoundEvent COMBO_LICK_5 = register("combo_lick5");
 
     private ModSounds() {
     }

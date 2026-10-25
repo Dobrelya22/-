@@ -1,4 +1,4 @@
-Бас, гитары и барабаны в рок-звуках стрелы (flight, strike1–4, combo_rock, combo_lick) —
+Бас, гитары, барабаны, хор и струнные в рок-звуках стрелы (flight, strike1–8, combo_*) —
 сэмплы банка MuseScore General, сыгранные через FluidSynth (tools/rock_sounds.py).
 The bass, guitar and drum samples in these sounds come from the MuseScore General SoundFont:
 

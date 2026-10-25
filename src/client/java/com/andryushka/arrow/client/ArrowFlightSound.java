@@ -10,8 +10,8 @@ import net.minecraft.util.math.MathHelper;
 /**
  * Стрела в полёте играет сочный бас-рифф (tools/rock_sounds.py): звук следует за ней, громче на
  * скорости и тише, когда она кружит. Высоту почти не трогаем, чтобы рифф не «плыл»; только в
- * толпе, разогнавшись, стрела звучит чуть выше. Пока идёт серия побед, бас уходит — у рока серии
- * свой бас.
+ * толпе, разогнавшись, стрела звучит чуть выше. Пока идёт серия побед, бас уходит — у музыки
+ * серии свой бас.
  */
 public class ArrowFlightSound extends MovingSoundInstance {
     private final AndryushkaArrowEntity arrow;
@@ -47,7 +47,7 @@ public class ArrowFlightSound extends MovingSoundInstance {
         this.x = this.arrow.getX();
         this.y = this.arrow.getY();
         this.z = this.arrow.getZ();
-        this.volume = MathHelper.clamp(0.18F + speed * 0.45F, 0.12F, 0.6F) * (1.0F - ClientArrowState.rockLevel());
+        this.volume = MathHelper.clamp(0.18F + speed * 0.45F, 0.12F, 0.6F) * (1.0F - ComboMusic.level());
         this.pitch = 1.0F + (this.arrow.getBoost() - 1.0F) * 0.06F;
     }
 }
