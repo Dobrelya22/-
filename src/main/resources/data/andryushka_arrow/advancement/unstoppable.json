@@ -1,0 +1,23 @@
+{
+  "parent": "andryushka_arrow:streak_10",
+  "display": {
+    "icon": {
+      "id": "minecraft:blaze_powder"
+    },
+    "title": {
+      "translate": "advancements.andryushka_arrow.unstoppable.title"
+    },
+    "description": {
+      "translate": "advancements.andryushka_arrow.unstoppable.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

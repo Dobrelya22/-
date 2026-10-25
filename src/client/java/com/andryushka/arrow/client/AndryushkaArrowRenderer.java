@@ -1,7 +1,7 @@
 package com.andryushka.arrow.client;
 
 import com.andryushka.arrow.AndryushkaArrowMod;
-import com.andryushka.arrow.Rainbow;
+import com.andryushka.arrow.ArrowTrail;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,7 +28,8 @@ import net.minecraft.util.math.Vec3d;
 
 /**
  * Стрела Яка: тонкое красное древко, ступенчатый наконечник и крестовое оперение,
- * вокруг — мягкое переливающееся свечение, позади — светящаяся радужная лента.
+ * вокруг — мягкое переливающееся свечение, позади — светящаяся лента цвета следа
+ * (радуга, пламя, лёд…). Чем выше уровень стрелы, тем длиннее и шире лента.
  */
 public class AndryushkaArrowRenderer extends EntityRenderer<AndryushkaArrowEntity> {
     public static final EntityModelLayer MODEL_LAYER = new EntityModelLayer(AndryushkaArrowMod.id("andryushka_arrow"), "main");
@@ -107,7 +108,7 @@ public class AndryushkaArrowRenderer extends EntityRenderer<AndryushkaArrowEntit
 
         // Свечение: яркое у наконечника и мягкое вокруг всей стрелы, оттенок медленно переливается.
         float pulse = 0.85F + 0.15F * MathHelper.sin(time * 0.3F);
-        int tipColor = Rainbow.hsvToRgb(time * 0.01F, 0.45F, 1.0F);
+        int tipColor = arrow.getTrail().color(time * 0.01F, 0.45F);
         this.renderGlow(matrices, vertexConsumers, forward.multiply(0.42), 0.55F * pulse, tipColor, 0.9F);
         this.renderGlow(matrices, vertexConsumers, Vec3d.ZERO, 1.15F, 0xFF3040, 0.35F * pulse);
         matrices.pop();
@@ -160,7 +161,8 @@ public class AndryushkaArrowRenderer extends EntityRenderer<AndryushkaArrowEntit
         int count = points.size();
 
         Vec3d camera = this.dispatcher.camera.getPos();
-        double widthScale = 0.85 + 0.3 * (arrow.getBoost() - 1.0);
+        double widthScale = (0.85 + 0.3 * (arrow.getBoost() - 1.0)) * (1.0 + 0.06 * (arrow.getLevel() - 1));
+        ArrowTrail trail = arrow.getTrail();
         Vec3d[] sides = new Vec3d[count];
         float[] fades = new float[count];
         for (int i = 0; i < count; i++) {
@@ -182,8 +184,8 @@ public class AndryushkaArrowRenderer extends EntityRenderer<AndryushkaArrowEntit
         for (int i = 0; i < count - 1; i++) {
             Vec3d a = points.get(i).subtract(origin);
             Vec3d b = points.get(i + 1).subtract(origin);
-            int colorA = trailColor(i, time, fades[i]);
-            int colorB = trailColor(i + 1, time, fades[i + 1]);
+            int colorA = trailColor(trail, i, time, fades[i]);
+            int colorB = trailColor(trail, i + 1, time, fades[i + 1]);
             float uA = i / (float) (count - 1);
             float uB = (i + 1) / (float) (count - 1);
             Vec3d a1 = a.add(sides[i]);
@@ -202,8 +204,8 @@ public class AndryushkaArrowRenderer extends EntityRenderer<AndryushkaArrowEntit
     }
 
     /** Цвет точки ленты; яркость уже умножена на затухание (слой складывает цвета). */
-    private static int trailColor(int index, float time, float fade) {
-        int rgb = Rainbow.hsvToRgb(index * 0.055F - time * 0.025F, 0.85F, 1.0F);
+    private static int trailColor(ArrowTrail trail, int index, float time, float fade) {
+        int rgb = trail.color(index * 0.055F - time * 0.025F);
         int r = Math.round(((rgb >> 16) & 0xFF) * fade);
         int g = Math.round(((rgb >> 8) & 0xFF) * fade);
         int b = Math.round((rgb & 0xFF) * fade);

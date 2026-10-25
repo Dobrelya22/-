@@ -1,9 +1,12 @@
 package com.andryushka.arrow.entity;
 
+import com.andryushka.arrow.ArrowLevel;
 import com.andryushka.arrow.ArrowMode;
+import com.andryushka.arrow.ArrowTrail;
 import com.andryushka.arrow.LootDelivery;
 import com.andryushka.arrow.Rainbow;
 import com.andryushka.arrow.registry.ModAdvancements;
+import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModDamageTypes;
 import com.andryushka.arrow.registry.ModEntities;
 import com.andryushka.arrow.registry.ModGameRules;
@@ -91,8 +94,10 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
     private static final int PATH_RECHECK_TICKS = 10;
     private static final int PATH_RETRY_TICKS = 20;
     private static final int LIFE_SYNC_INTERVAL = 5;
-    /** Сколько последних позиций помнит клиент для ленты радужного следа (≈ 1 секунда). */
+    /** Сколько последних позиций помнит клиент для ленты следа (≈ 1 секунда; на высоких уровнях дольше). */
     private static final int TRAIL_LENGTH = 20;
+    /** Победы, между которыми меньше этого, складываются в серию: «двойная», «тройная»… */
+    private static final int COMBO_WINDOW_TICKS = 2 * 20;
     private static final Vector3f MARKER_COLOR = new Vector3f(1.0F, 0.2F, 0.25F);
     private static final Vec3d[] ESCAPE_DIRECTIONS = createEscapeDirections();
 
@@ -112,6 +117,13 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
     /** Сколько тиков длится активная фаза этой стрелы — для полоски времени на клиенте. */
     private static final TrackedData<Integer> MAX_LIFE =
             DataTracker.registerData(AndryushkaArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
+    private static final TrackedData<Integer> LEVEL =
+            DataTracker.registerData(AndryushkaArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
+    /** Длина текущей серии побед — клиент показывает «ДВОЙНАЯ!», «ТРОЙНАЯ!»… */
+    private static final TrackedData<Integer> COMBO =
+            DataTracker.registerData(AndryushkaArrowEntity.class, TrackedDataHandlerRegistry.INTEGER);
+    private static final TrackedData<Byte> TRAIL =
+            DataTracker.registerData(AndryushkaArrowEntity.class, TrackedDataHandlerRegistry.BYTE);
 
     private enum Phase { ACTIVE, RETURNING, FINALE }
 
@@ -122,8 +134,16 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
 
     private Phase phase = Phase.ACTIVE;
     private ArrowMode mode = ArrowMode.TARGET;
-    /** Предмет, которым стрела снова станет; пустой, если её выпустили в творческом режиме. */
+    /** Предмет, которым стрела снова станет; в нём же копятся победы. */
     private ItemStack stack = ItemStack.EMPTY;
+    /**
+     * Вернётся ли предмет владельцу. В творческом режиме предмет остался в руке, летит его копия:
+     * её победы в конце записываются в тот предмет по номеру стрелы.
+     */
+    private boolean returnsItem = true;
+    /** Победы за всё время, включая этот полёт. */
+    private int lifetimeKills;
+    private int lastKillAge = -COMBO_WINDOW_TICKS - 1;
     private int life;
     private int maxLife = ACTIVE_TICKS;
     private int finaleTicks;
@@ -163,12 +183,19 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         this.ignoreCameraFrustum = true;
     }
 
-    /** Выпускает стрелу из глаз игрока по направлению взгляда. */
+    /** Выпускает стрелу из глаз игрока по направлению взгляда; непустой предмет потом вернётся. */
     public static AndryushkaArrowEntity launch(ServerWorld world, ServerPlayerEntity owner, ItemStack stack,
                                            ArrowMode mode, @Nullable MobEntity target) {
+        return launch(world, owner, stack, mode, target, !stack.isEmpty());
+    }
+
+    public static AndryushkaArrowEntity launch(ServerWorld world, ServerPlayerEntity owner, ItemStack stack,
+                                           ArrowMode mode, @Nullable MobEntity target, boolean returnsItem) {
         AndryushkaArrowEntity arrow = new AndryushkaArrowEntity(ModEntities.ANDRYUSHKA_ARROW, world);
         arrow.configure(owner.getUuid(), stack, mode);
-        arrow.setMaxLife(world.getGameRules().getInt(ModGameRules.DURATION) * 20);
+        arrow.returnsItem = returnsItem;
+        // Ветеран летает дольше: +5 секунд за каждый уровень после первого.
+        arrow.setMaxLife((world.getGameRules().getInt(ModGameRules.DURATION) + ArrowLevel.extraSeconds(arrow.getLevel())) * 20);
         arrow.setOwner(owner);
         Vec3d look = owner.getRotationVec(1.0F);
         Vec3d center = owner.getEyePos().add(look.multiply(0.8));
@@ -182,15 +209,23 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         }
         world.spawnEntity(arrow);
         world.playSound(null, center.x, center.y, center.z, ModSounds.LAUNCH, SoundCategory.PLAYERS, 1.0F, 1.0F);
-        rainbowBurst(world, center, 5, 0.15);
+        arrow.burst(world, center, 5, 0.15);
         ModAdvancements.grant(owner, ModAdvancements.LAUNCH);
         return arrow;
     }
 
     public void configure(UUID ownerUuid, ItemStack stack, ArrowMode mode) {
         this.dataTracker.set(OWNER_UUID, Optional.of(ownerUuid));
-        this.stack = stack.copy();
         this.mode = mode;
+        this.setStack(stack.copy());
+    }
+
+    /** Предмет стрелы: из него берутся победы, уровень и окраска следа. */
+    private void setStack(ItemStack stack) {
+        this.stack = stack;
+        this.lifetimeKills = stack.getOrDefault(ModComponents.KILLS, 0);
+        this.dataTracker.set(LEVEL, ArrowLevel.of(this.lifetimeKills));
+        this.dataTracker.set(TRAIL, (byte) stack.getOrDefault(ModComponents.TRAIL, ArrowTrail.RAINBOW).ordinal());
     }
 
     @Override
@@ -202,6 +237,9 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         builder.add(TARGET_ID, -1);
         builder.add(KILLS, 0);
         builder.add(MAX_LIFE, ACTIVE_TICKS);
+        builder.add(LEVEL, 1);
+        builder.add(COMBO, 0);
+        builder.add(TRAIL, (byte) ArrowTrail.RAINBOW.ordinal());
     }
 
     // ---------------------------------------------------------------- состояние для клиента и команд
@@ -217,6 +255,20 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
     /** Сколько тиков прошло в активной фазе (на клиенте обновляется раз в несколько тиков). */
     public int getSyncedLife() {
         return this.dataTracker.get(LIFE);
+    }
+
+    /** Уровень стрелы, I–V. */
+    public int getLevel() {
+        return this.dataTracker.get(LEVEL);
+    }
+
+    /** Длина текущей серии побед (сбрасывается, если следующая победа не скоро). */
+    public int getCombo() {
+        return this.dataTracker.get(COMBO);
+    }
+
+    public ArrowTrail getTrail() {
+        return ArrowTrail.byIndex(this.dataTracker.get(TRAIL));
     }
 
     /** Сколько тиков длится активная фаза этой стрелы. */
@@ -315,13 +367,15 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         if (effects && this.respondDelay > 0 && this.getWorld() instanceof ServerWorld world) {
             this.respond(world);
         }
-        if (!this.stack.isEmpty()) {
+        if (this.returnsItem && !this.stack.isEmpty()) {
             ItemStack returned = this.stack;
             this.stack = ItemStack.EMPTY;
             owner.getInventory().insertStack(returned);
             if (!returned.isEmpty()) {
                 owner.dropItem(returned, false);
             }
+        } else {
+            this.saveKillsToHeldCopy(owner);
         }
         if (effects) {
             owner.getWorld().playSound(null, owner.getX(), owner.getY(), owner.getZ(), SoundEvents.ENTITY_ITEM_PICKUP,
@@ -433,10 +487,10 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         if (target == null) {
             return new Plan(this.orbitPoint(world, owner, WAIT_ORBIT_RADIUS), WAIT_SPEED, 25.0F, null, false);
         }
-        double speed = BASE_SPEED * this.speedMultiplier;
+        double boost = this.speedMultiplier * ArrowLevel.speedFactor(this.getLevel());
+        double speed = BASE_SPEED * boost;
         // Чем быстрее стрела, тем резче она должна поворачивать, чтобы не промахиваться.
-        return new Plan(this.aimPoint(target, speed), speed, HUNT_TURN_DEGREES * (float) this.speedMultiplier,
-                target, false);
+        return new Plan(this.aimPoint(target, speed), speed, HUNT_TURN_DEGREES * (float) boost, target, false);
     }
 
     private Plan planReturn(ServerPlayerEntity owner) {
@@ -488,15 +542,17 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
             return;
         }
         Vec3d center = this.getBoundingBox().getCenter();
-        if (!this.stack.isEmpty()) {
+        if (this.returnsItem && !this.stack.isEmpty()) {
             ItemEntity item = new ItemEntity(world, center.x, center.y, center.z, this.stack);
             this.stack = ItemStack.EMPTY;
             item.setVelocity(0.0, -0.1, 0.0);
             item.setPickupDelay(10);
             world.spawnEntity(item);
+        } else if (owner != null) {
+            this.saveKillsToHeldCopy(owner);
         }
         world.spawnParticles(ParticleTypes.END_ROD, center.x, center.y, center.z, 16, 0.2, 0.2, 0.2, 0.04);
-        rainbowBurst(world, center, 4, 0.25);
+        this.burst(world, center, 4, 0.25);
         world.playSound(null, center.x, center.y, center.z, SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
                 SoundCategory.PLAYERS, 1.0F, 1.2F);
         if (owner != null) {
@@ -505,12 +561,28 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         this.discard();
     }
 
-    /** Облачко разноцветных искр: при запуске, ударе и падении. */
-    private static void rainbowBurst(ServerWorld world, Vec3d at, int perColor, double spread) {
+    /** Облачко искр цвета следа: при запуске, ударе и падении. */
+    private void burst(ServerWorld world, Vec3d at, int perColor, double spread) {
+        ArrowTrail trail = this.getTrail();
         float start = world.getRandom().nextFloat();
         for (int i = 0; i < 4; i++) {
-            DustParticleEffect dust = new DustParticleEffect(Rainbow.toVector(Rainbow.hsvToRgb(start + i * 0.25F, 0.85F, 1.0F)), 1.2F);
+            DustParticleEffect dust = new DustParticleEffect(Rainbow.toVector(trail.color(start + i * 0.25F)), 1.2F);
             world.spawnParticles(dust, at.x, at.y, at.z, perColor, spread, spread, spread, 0.0);
+        }
+    }
+
+    /** Творческий режим: победы копии записываются в предмет с тем же номером в инвентаре владельца. */
+    private void saveKillsToHeldCopy(ServerPlayerEntity owner) {
+        UUID id = this.stack.get(ModComponents.ARROW_ID);
+        if (id == null || this.lifetimeKills == this.stack.getOrDefault(ModComponents.KILLS, 0)) {
+            return;
+        }
+        for (int slot = 0; slot < owner.getInventory().size(); slot++) {
+            ItemStack held = owner.getInventory().getStack(slot);
+            if (held.isOf(this.stack.getItem()) && id.equals(held.get(ModComponents.ARROW_ID))) {
+                held.set(ModComponents.KILLS, this.lifetimeKills);
+                return;
+            }
         }
     }
 
@@ -614,13 +686,14 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         this.hitCooldown = HIT_COOLDOWN;
         // Урон постоянный и не зависит от скорости — в том числе от ускорения в толпе.
         DamageSource source = ModDamageTypes.arrow(world, this, owner);
-        boolean damaged = target.damage(source, world.getGameRules().getInt(ModGameRules.DAMAGE));
+        float damage = world.getGameRules().getInt(ModGameRules.DAMAGE) + ArrowLevel.extraDamage(this.getLevel());
+        boolean damaged = target.damage(source, damage);
         Vec3d center = target.getBoundingBox().getCenter();
         if (damaged) {
             world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), SoundEvents.ENTITY_ARROW_HIT,
                     SoundCategory.PLAYERS, 1.0F, 1.1F + this.random.nextFloat() * 0.3F);
             world.spawnParticles(ParticleTypes.CRIT, center.x, center.y, center.z, 12, 0.25, 0.25, 0.25, 0.4);
-            rainbowBurst(world, to, 2, 0.1);
+            this.burst(world, to, 2, 0.1);
         }
         if (!target.isAlive()) {
             if (damaged) {
@@ -634,8 +707,15 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
     private void onKill(ServerWorld world, ServerPlayerEntity owner, MobEntity target, Vec3d center) {
         int kills = this.getKills() + 1;
         this.dataTracker.set(KILLS, kills);
+        int combo = this.age - this.lastKillAge <= COMBO_WINDOW_TICKS ? this.getCombo() + 1 : 1;
+        this.lastKillAge = this.age;
+        this.dataTracker.set(COMBO, combo);
+        if (combo == 5) {
+            ModAdvancements.grant(owner, ModAdvancements.UNSTOPPABLE);
+        }
+        this.recordLifetimeKill(world, owner);
         world.spawnParticles(ParticleTypes.FIREWORK, center.x, center.y, center.z, 14, 0.2, 0.2, 0.2, 0.12);
-        rainbowBurst(world, center, 6, 0.35);
+        this.burst(world, center, 6, 0.35);
         // Звонкое «дзынь», как при попадании из лука, — сигнал владельцу о победе.
         world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), SoundEvents.ENTITY_ARROW_HIT_PLAYER,
                 SoundCategory.PLAYERS, 0.5F, 1.0F);
@@ -648,7 +728,29 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         if (!owner.canSee(target)) {
             ModAdvancements.grant(owner, ModAdvancements.UNSEEN_KILL);
         }
-        LootDelivery.deliver(world, target.getBoundingBox(), owner);
+        LootDelivery.deliver(world, target.getBoundingBox(), owner, this.getTrail());
+    }
+
+    /** Победа идёт в счёт стрелы за всё время; новый уровень сразу прибавляет сил и 5 секунд полёта. */
+    private void recordLifetimeKill(ServerWorld world, ServerPlayerEntity owner) {
+        this.lifetimeKills++;
+        if (this.returnsItem && !this.stack.isEmpty()) {
+            this.stack.set(ModComponents.KILLS, this.lifetimeKills);
+        }
+        int level = ArrowLevel.of(this.lifetimeKills);
+        if (level <= this.getLevel()) {
+            return;
+        }
+        this.dataTracker.set(LEVEL, level);
+        this.setMaxLife(this.maxLife + ArrowLevel.extraSeconds(level) * 20 - ArrowLevel.extraSeconds(level - 1) * 20);
+        Vec3d center = this.getBoundingBox().getCenter();
+        world.spawnParticles(ParticleTypes.TOTEM_OF_UNDYING, center.x, center.y, center.z, 30, 0.3, 0.3, 0.3, 0.4);
+        this.burst(world, center, 10, 0.5);
+        world.playSound(null, owner.getX(), owner.getEyeY(), owner.getZ(), SoundEvents.ENTITY_PLAYER_LEVELUP,
+                SoundCategory.PLAYERS, 0.9F, 1.3F);
+        if (level == ArrowLevel.MAX) {
+            ModAdvancements.grant(owner, ModAdvancements.MASTER);
+        }
     }
 
     private static boolean segmentTouches(Box box, Vec3d from, Vec3d to) {
@@ -850,7 +952,9 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
             last = null;
         }
         this.trailHistory.add(0, current);
-        if (this.trailHistory.size() > TRAIL_LENGTH) {
+        // Ветеранская стрела тянет след длиннее.
+        int length = TRAIL_LENGTH + 3 * (this.getLevel() - 1);
+        while (this.trailHistory.size() > length) {
             this.trailHistory.remove(this.trailHistory.size() - 1);
         }
 
@@ -858,7 +962,7 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
             Vec3d delta = current.subtract(last);
             for (int i = 0; i < 2; i++) {
                 Vec3d point = last.add(delta.multiply(this.random.nextDouble()));
-                Vector3f color = Rainbow.toVector(Rainbow.hsvToRgb(this.random.nextFloat(), 0.75F, 1.0F));
+                Vector3f color = Rainbow.toVector(this.getTrail().color(this.random.nextFloat(), 0.75F));
                 world.addParticle(new DustParticleEffect(color, 0.7F),
                         point.x + this.random.nextGaussian() * 0.08, point.y + this.random.nextGaussian() * 0.08,
                         point.z + this.random.nextGaussian() * 0.08, 0.0, 0.0, 0.0);
@@ -930,6 +1034,8 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         nbt.putString("Mode", this.mode.asString());
         nbt.putInt("Life", this.life);
         nbt.putInt("MaxLife", this.maxLife);
+        nbt.putBoolean("ReturnsItem", this.returnsItem);
+        nbt.putInt("LifetimeKills", this.lifetimeKills);
         nbt.putInt("FinaleTicks", this.finaleTicks);
         nbt.putInt("CircleTicks", this.circleTicks);
         nbt.putInt("Kills", this.getKills());
@@ -955,9 +1061,14 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         this.circleTicks = nbt.getInt("CircleTicks");
         this.dataTracker.set(KILLS, nbt.getInt("Kills"));
         this.targetUuid = nbt.containsUuid("Target") ? nbt.getUuid("Target") : null;
-        this.stack = nbt.contains("Item", NbtElement.COMPOUND_TYPE)
+        this.setStack(nbt.contains("Item", NbtElement.COMPOUND_TYPE)
                 ? ItemStack.fromNbt(this.getRegistryManager(), nbt.getCompound("Item")).orElse(ItemStack.EMPTY)
-                : ItemStack.EMPTY;
+                : ItemStack.EMPTY);
+        this.returnsItem = !nbt.contains("ReturnsItem") || nbt.getBoolean("ReturnsItem");
+        if (nbt.contains("LifetimeKills", NbtElement.INT_TYPE)) {
+            this.lifetimeKills = nbt.getInt("LifetimeKills");
+            this.dataTracker.set(LEVEL, ArrowLevel.of(this.lifetimeKills));
+        }
     }
 
     private static Phase parsePhase(String name) {
