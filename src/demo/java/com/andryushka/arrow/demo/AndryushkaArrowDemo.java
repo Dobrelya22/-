@@ -230,7 +230,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                     "gamerule doDaylightCycle false",
                     "gamerule doWeatherCycle false",
                     "gamerule doMobSpawning false",
-                    "kill @e[type=!minecraft:player]",
+                    "tp @e[type=!minecraft:player] 0 -200 0",
                     "time set 6000",
                     "weather clear",
                     "difficulty easy",
@@ -598,10 +598,13 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         return stack;
     }
 
-    /** Убирает мобов, предметы и стену; стрелу в полёте не трогает. */
+    /**
+     * Убирает мобов, предметы и стену; стрелу в полёте не трогает. Мобов не убиваем, а отправляем
+     * в пустоту под миром: после /kill из них выпал бы лут и остался лежать на поле.
+     */
     private static void clearStage(MinecraftClient client) {
         command(client,
-                "kill @e[type=!minecraft:player,type=!andryushka_arrow:andryushka_arrow]",
+                "tp @e[type=!minecraft:player,type=!andryushka_arrow:andryushka_arrow] 0 -200 0",
                 "fill -14 " + GROUND + " 2 14 " + (GROUND + 4) + " 30 minecraft:air");
     }
 
