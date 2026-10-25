@@ -687,7 +687,7 @@ class Montage:
             frame = (frame * (1 - 0.7 * ease_out(x / 0.5))).astype(np.uint8)
             big = self.sprite("download", lambda: text_sprite("КАЧАЙ 1.3.0", 120, colors=FIRE, stroke=8, shadow=6))
             link = self.sprite("link", lambda: pill_sprite("github.com/Dobrelya22/-", 40, (24, 18, 30, 240),
-                                                           small="→ Releases", small_color=(255, 214, 90)))
+                                                           small="· Releases", small_color=(255, 214, 90)))
             scale, alpha = slam(x, 0.1, 0.3, 2.0)
             blend(frame, big, W / 2, 270, scale, alpha)
             blend(frame, link, W / 2, 420, 1.0, ease_out((x - 0.5) / 0.3))
