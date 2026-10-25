@@ -1,9 +1,11 @@
 package com.andryushka.arrow.demo;
 
 import com.andryushka.arrow.AndryushkaArrowMod;
+import com.andryushka.arrow.ArrowTrail;
 import com.andryushka.arrow.client.ArrowKeyBindings;
 import com.andryushka.arrow.client.ClientArrowState;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
+import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModItems;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -12,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -22,10 +25,19 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.minecraft.advancement.AdvancementEntry;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.client.gui.screen.advancement.AdvancementsScreen;
+import net.minecraft.client.gui.screen.ingame.CraftingScreen;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.network.ClientAdvancementManager;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.option.Perspective;
@@ -36,14 +48,26 @@ import net.minecraft.client.sound.SoundInstance;
 import net.minecraft.client.sound.TickableSoundInstance;
 import net.minecraft.client.sound.WeightedSoundSet;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.mob.HuskEntity;
+import net.minecraft.entity.passive.WolfEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.DataConfiguration;
+import net.minecraft.screen.CraftingScreenHandler;
+import net.minecraft.screen.ScreenHandlerContext;
+import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Difficulty;
@@ -54,29 +78,35 @@ import net.minecraft.world.gen.WorldPresets;
 import net.minecraft.world.level.LevelInfo;
 
 /**
- * Сценарий демонстрационного ролика. Включается только флагом -Dandryushka.demo=true
- * (./gradlew runDemo) и в jar мода не попадает. Создаёт плоский мир, расставляет мобов
- * и играет за игрока: целится, выпускает стрелу, жмёт клавиши режима и свиста — теми же
- * путями, что и живой игрок. Вверху экрана идут подписи.
+ * Сценарий обзорного ролика (примерно 10 минут). Включается только флагом -Dandryushka.demo=true
+ * (./gradlew runDemo) и в jar мода не попадает. Создаёт плоский мир и играет за игрока: крафтит,
+ * целится, выпускает стрелу, жмёт клавиши режима и свиста, бьёт мобов — теми же путями, что
+ * и живой игрок. Вверху экрана идут заголовки сцен.
  *
- * <p>Программный OpenGL в CI рисует всего несколько кадров в секунду, поэтому игру можно
- * замедлить (переменная ANDRYUSHKA_DEMO_TICK_RATE → /tick rate) и потом ускорить запись до
- * плавных 60 кадров. Звук при этом пишется не с колонок, а журналом: какой звук, когда,
- * где и с какой громкостью (demo-sounds.txt) — из него tools/demo/sound_track.py собирает
- * звуковую дорожку в масштабе ролика.
+ * <p>Действия привязаны к фразам закадрового голоса: tools/demo/narration.py пишет файл меток
+ * («метка начало конец», путь — в ANDRYUSHKA_DEMO_CUES), и если фраза сдвинулась, сдвигаются и её
+ * действия. Без файла меток берутся секунды прямо из tools/demo/narration.txt.
+ *
+ * <p>Программный OpenGL в CI рисует медленно, поэтому игру можно замедлить (ANDRYUSHKA_DEMO_TICK_RATE
+ * → /tick rate) и потом ускорить запись до плавных 60 кадров. Звук при этом пишется не с колонок,
+ * а журналом (demo-sounds.txt) — из него tools/demo/sound_track.py собирает дорожку в масштабе ролика.
  */
 public class AndryushkaArrowDemo implements ClientModInitializer {
     private static final boolean ENABLED = Boolean.getBoolean("andryushka.demo");
     /** Время начала и конца сценария — по нему обрезается запись экрана. */
     private static final Path MARKERS = Path.of("demo-markers.txt");
     private static final Path SOUNDS = Path.of("demo-sounds.txt");
+    private static final Path DEFAULT_NARRATION = Path.of("../tools/demo/narration.txt");
     private static final int WARMUP_TICKS = 80;
     /** На каком тике разминки замедлять игру: мир уже загружен, но сценарий ещё не начался. */
     private static final int SLOWDOWN_TICK = 40;
     private static final float TICK_RATE = tickRateFromEnvironment();
     /** Игрок висит над полем, камера — от третьего лица со спины. */
     private static final Vec3d HOVER = new Vec3d(0.5, -56.5, -2.5);
+    private static final int GROUND = -60;
     private static final float VIEW_PITCH = 28.0F;
+    /** Верстак для сцен крафта — прямо под игроком. */
+    private static final BlockPos TABLE = new BlockPos(0, GROUND, -1);
     /** Плавность поворота камеры: доля оставшегося угла за тик. */
     private static final float STEER_SMOOTHING = 0.12F;
     /**
@@ -85,24 +115,36 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
      */
     private static final float FOLLOW_YAW_OFFSET = -14.0F;
     private static final float FOLLOW_PITCH_OFFSET = 7.0F;
+    private static final String[] TRAILS = {"fire", "ice", "toxic", "void", "gold", "rainbow"};
 
     private record Step(int tick, Consumer<MinecraftClient> action) {
     }
 
+    /** Что показывать подсказкой поверх игры. */
+    private enum Tooltip { NONE, CRAFT_RESULT, ARROW }
+
     private final List<Step> script = new ArrayList<>();
+    private final Map<String, Double> cues = new HashMap<>();
     private boolean worldRequested;
     private int warmup;
     private int tick = -1;
+    private int endTick = Integer.MAX_VALUE;
     private Text caption = Text.empty();
     private float lookYaw;
     private float lookPitch = VIEW_PITCH;
     private boolean steering;
     /** Пока стрела охотится, камера следит за ней и её целью. */
     private boolean follow;
+    /** Медленный поворот камеры: от какого угла, к какому и за сколько тиков. */
+    private float panFrom;
+    private float panTo;
+    private int panStart = -1;
+    private int panTicks;
+    private Tooltip tooltip = Tooltip.NONE;
     private PrintWriter soundLog;
     /** После конца сценария журнал не трогаем: повторное открытие стёрло бы его. */
     private boolean soundLogClosed;
-    /** Звуки, которые меняют громкость и высоту на ходу (свист стрелы в полёте), и их номера в журнале. */
+    /** Звуки, которые меняют громкость и высоту на ходу (флейта стрелы в полёте), и их номера в журнале. */
     private final Map<TickableSoundInstance, Integer> loops = new IdentityHashMap<>();
     private int loopCount;
 
@@ -111,37 +153,96 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         if (!ENABLED) {
             return;
         }
+        this.loadCues();
         this.writeScript();
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
-        HudRenderCallback.EVENT.register(this::renderCaption);
+        HudRenderCallback.EVENT.register(this::renderOverlay);
+        ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
+                ScreenEvents.afterRender(screen).register(this::renderScreenOverlay));
+    }
+
+    // ---------------------------------------------------------------- метки
+
+    private void loadCues() {
+        String timing = System.getenv("ANDRYUSHKA_DEMO_CUES");
+        try {
+            if (timing != null && Files.exists(Path.of(timing))) {
+                for (String line : Files.readAllLines(Path.of(timing), StandardCharsets.UTF_8)) {
+                    String[] parts = line.trim().split("\\s+");
+                    if (parts.length >= 2) {
+                        this.cues.put(parts[0], Double.parseDouble(parts[1]));
+                    }
+                }
+            } else {
+                for (String line : Files.readAllLines(DEFAULT_NARRATION, StandardCharsets.UTF_8)) {
+                    String[] parts = line.trim().split("\\s+", 3);
+                    if (parts.length >= 2 && !line.startsWith("#")) {
+                        this.cues.put(parts[1], Double.parseDouble(parts[0]));
+                    }
+                }
+            }
+        } catch (IOException | NumberFormatException e) {
+            AndryushkaArrowMod.LOGGER.error("Демо: не прочитать метки озвучки", e);
+        }
+        AndryushkaArrowMod.LOGGER.info("Демо: меток {}, конец на {} с", this.cues.size(), this.cues.get("end"));
+    }
+
+    /** Действие через {@code offset} секунд после начала фразы {@code cue}. */
+    private void on(String cue, double offset, Consumer<MinecraftClient> action) {
+        Double start = this.cues.get(cue);
+        if (start == null) {
+            AndryushkaArrowMod.LOGGER.warn("Демо: нет метки {}", cue);
+            return;
+        }
+        this.script.add(new Step((int) Math.round(Math.max(0.0, start + offset) * 20.0), action));
     }
 
     // ---------------------------------------------------------------- сценарий
 
     private void writeScript() {
-        at(0.0, client -> {
+        this.intro();
+        this.crafting();
+        this.targetMode();
+        this.allMode();
+        this.friends();
+        this.loot();
+        this.guard();
+        this.assist();
+        this.levels();
+        this.combo();
+        this.grinder();
+        this.trails();
+        this.advancements();
+        this.finale();
+        Double end = this.cues.get("end");
+        this.endTick = end != null ? (int) Math.round(end * 20.0) : 600 * 20;
+        this.script.add(new Step(this.endTick, client -> {
+            mark("end");
+            this.closeSoundLog();
+            client.scheduleStop();
+        }));
+    }
+
+    private void intro() {
+        on("hello", -0.5, client -> {
             mark("start");
             command(client,
-                    "gamerule sendCommandFeedback false",
-                    "gamerule commandBlockOutput false",
                     "gamerule doDaylightCycle false",
                     "gamerule doWeatherCycle false",
                     "gamerule doMobSpawning false",
-                    "gamerule announceAdvancements false",
                     "kill @e[type=!minecraft:player]",
                     "time set 6000",
                     "weather clear",
                     "difficulty easy",
                     "gamemode survival @a",
-                    "give @a andryushka_arrow:andryushka_arrow",
+                    "clear @a",
                     "tp @a " + HOVER.x + " " + HOVER.y + " " + HOVER.z + " 0 " + VIEW_PITCH,
-                    mob("husk", -3, 5, "Цель"),
-                    mob("husk", 3, 6, null),
-                    mob("pig", 0, 9, null),
-                    mob("sheep", -1, 11, null));
+                    mob("husk", -6, 9, ""), mob("husk", 5, 11, ""), mob("pig", -2, 13, ""),
+                    mob("sheep", 2, 7, ""), mob("pig", 8, 6, ""));
+            giveArrow(client, 0, "rainbow");
             server(client, server -> {
                 // Выживание — чтобы были видны сердечки, но игрок висит в воздухе и неуязвим.
-                ServerPlayerEntity player = server.getPlayerManager().getPlayerList().get(0);
+                ServerPlayerEntity player = player(server);
                 player.getAbilities().allowFlying = true;
                 player.getAbilities().flying = true;
                 player.getAbilities().invulnerable = true;
@@ -149,49 +250,285 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
             });
             client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
             client.inGameHud.getChatHud().clear(false);
-            this.look(0.0F, VIEW_PITCH);
-            this.caption = Text.literal("Стрела Андрюшки — демонстрация мода");
+            this.caption = Text.literal("Обзор мода «Стрела Андрюшки»");
+            this.look(-35.0F, 22.0F);
         });
-        // Животные, сгенерированные вместе с миром, убраны выше; убираем и выпавший с них лут.
-        at(0.2, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
-        // Секунды совпадают с закадровым голосом: tools/demo/narration.txt.
-        at(9.5, client -> this.caption = Text.literal("Режим «Выбранная цель»: стрела бьёт только моба под прицелом"));
-        at(10.0, client -> this.lookAt(client, new Vec3d(-2.5, -59.0, 5.5)));
-        at(15.0, client -> {
+        on("hello", 0.0, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
+        on("hello", 1.0, client -> this.pan(-35.0F, 35.0F, 26.0));
+    }
+
+    private void crafting() {
+        on("craft", -0.5, client -> {
+            this.caption = Text.literal("Крафт: аметист, редстоун, стрела и алмаз");
+            this.look(0.0F, VIEW_PITCH);
+        });
+        on("craft", 0.5, client -> openCrafting(client, new ItemStack[] {
+                ItemStack.EMPTY, new ItemStack(Items.AMETHYST_SHARD), ItemStack.EMPTY,
+                new ItemStack(Items.REDSTONE), new ItemStack(Items.ARROW), new ItemStack(Items.REDSTONE),
+                ItemStack.EMPTY, new ItemStack(Items.DIAMOND), ItemStack.EMPTY}));
+        on("craft2", 0.0, client -> this.tooltip = Tooltip.CRAFT_RESULT);
+        on("craft3", 6.5, client -> {
+            this.tooltip = Tooltip.NONE;
+            closeCrafting(client);
+        });
+    }
+
+    private void targetMode() {
+        on("target", -0.5, client -> {
+            this.caption = Text.literal("Режим 1 — «Выбранная цель»");
+            clearStage(client);
+            command(client, mob("husk", -3, 5, "Цель"), mob("husk", 3, 6, ""), mob("pig", 0, 9, ""),
+                    mob("sheep", -1, 11, ""));
+        });
+        on("target", 1.5, client -> this.lookAt(client, new Vec3d(-2.5, GROUND + 1.0, 5.5)));
+        on("launch1", -1.0, AndryushkaArrowDemo::selectArrow);
+        on("launch1", -0.2, client -> {
             this.useArrow(client);
             this.follow = true;
         });
-        at(22.4, client -> {
-            this.caption = Text.literal("Цель повержена. Остальных стрела не тронула и ждёт рядом");
-            this.look(0.0F, VIEW_PITCH);
-        });
-        at(27.2, client -> this.caption = Text.literal("Свист (клавиша G): стрела отзывается и возвращается в руку"));
-        at(30.4, client -> press(ArrowKeyBindings.WHISTLE));
-        at(36.4, client -> {
-            this.caption = Text.literal("Клавиша R — режим «Все мобы в радиусе 50 блоков»");
-            command(client, "fill 2 -60 10 9 -57 10 minecraft:stone_bricks");
+        on("target4", 0.0, client -> this.look(0.0F, VIEW_PITCH));
+        on("whistle", -0.5, client -> this.caption = Text.literal("Свист (клавиша G) — стрела возвращается"));
+        on("whistle", 2.6, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void allMode() {
+        on("all", -0.3, client -> {
+            this.caption = Text.literal("Режим 2 — «Все мобы в радиусе 50 блоков»");
+            command(client, "fill 2 " + GROUND + " 10 9 " + (GROUND + 3) + " 10 minecraft:stone_bricks");
             for (int i = 0; i < 6; i++) {
-                command(client, mob("husk", 3 + (i % 3) * 2, 13 + (i / 3) * 2, null));
+                command(client, mob("husk", 3 + (i % 3) * 2, 13 + (i / 3) * 2, ""));
+            }
+            command(client, mob("pig", -6, 8, ""), mob("pig", -4, 15, ""));
+        });
+        on("all", 2.0, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("launch2", -1.0, AndryushkaArrowDemo::selectArrow);
+        on("launch2", -0.2, this::useArrow);
+        on("all3", 0.0, client -> this.caption = Text.literal("В толпе — до ×2 быстрее, урон прежний"));
+        on("all6", -0.8, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void friends() {
+        on("friends", -0.3, client -> {
+            this.caption = Text.literal("Стрела щадит своих");
+            clearStage(client);
+            command(client, mob("villager", -4, 7, ""), mob("iron_golem", 4, 8, ""), mob("pig", 0, 6, "Хрюша"));
+            for (int i = 0; i < 4; i++) {
+                command(client, mob("husk", -3 + i * 2, 13, ""));
+            }
+            server(client, server -> {
+                // Пёсик — приручённый игроком волк.
+                ServerWorld world = server.getOverworld();
+                WolfEntity wolf = EntityType.WOLF.create(world);
+                if (wolf != null) {
+                    wolf.refreshPositionAndAngles(-1.5, GROUND, 9.5, 180.0F, 0.0F);
+                    wolf.setOwner(player(server));
+                    wolf.setAiDisabled(true);
+                    wolf.setPersistent();
+                    world.spawnEntity(wolf);
+                }
+            });
+        });
+        on("friends2", 0.4, AndryushkaArrowDemo::selectArrow);
+        on("friends2", 1.3, this::useArrow);
+        on("friends4", 5.8, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void loot() {
+        on("loot", -0.3, client -> {
+            this.caption = Text.literal("Добыча летит прямо в инвентарь");
+            clearStage(client);
+            int[][] spots = {{-4, 8}, {-1, 10}, {2, 9}, {5, 7}};
+            for (int[] spot : spots) {
+                command(client, summon("husk", spot[0], spot[1], "NoAI:1b,PersistenceRequired:1b,"
+                        + "HandItems:[{id:\"minecraft:diamond_sword\",count:1},{}],HandDropChances:[2.0f,0.0f],"
+                        + "ArmorItems:[{},{},{},{id:\"minecraft:golden_helmet\",count:1}],"
+                        + "ArmorDropChances:[0.0f,0.0f,0.0f,2.0f]"));
             }
         });
-        at(37.6, client -> press(ArrowKeyBindings.TOGGLE_MODE));
-        // Второй пуск: дальше все 40 секунд жизни стрелы, до колокольчика и финала.
-        at(43.8, this::useArrow);
-        at(45.4, client -> this.caption = Text.literal("Стрела по очереди атакует всех мобов и облетает стены"));
-        at(50.0, client -> spawnWave(client, 0));
-        at(51.0, client -> this.caption = Text.literal("В толпе больше трёх мобов она разгоняется до ×2, урон прежний"));
-        at(59.0, client -> {
-            this.caption = Text.literal("Над полоской здоровья — режим, оставшееся время и победы");
-            spawnWave(client, 1);
+        on("loot2", -0.6, AndryushkaArrowDemo::selectArrow);
+        on("loot2", 0.3, this::useArrow);
+        on("loot3", 0.8, client -> client.setScreen(new InventoryScreen(client.player)));
+        on("loot3", 7.6, client -> {
+            client.player.closeHandledScreen();
+            // Добычу убираем, чтобы стрела вернулась в первую ячейку.
+            command(client, "clear @a minecraft:diamond_sword", "clear @a minecraft:golden_helmet",
+                    "clear @a minecraft:rotten_flesh");
         });
-        at(68.0, client -> spawnWave(client, 2));
-        at(72.6, client -> this.caption = Text.literal("Игроков стрела не трогает — только мобов"));
-        at(78.8, client -> this.caption = Text.literal("За 5 секунд до конца звенит колокольчик"));
-        at(83.8, client -> this.caption = Text.literal("Время вышло: стрела кружит вокруг хозяина…"));
-        at(87.3, client -> this.caption = Text.literal("…и падает предметом, который можно подобрать"));
-        at(89.3, client -> server(client, server -> {
+        on("loot4", 6.0, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void guard() {
+        on("guard", -0.3, client -> {
+            this.caption = Text.literal("Режим 3 — «Охрана»");
+            clearStage(client);
+        });
+        on("guard", 2.2, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("guard2", -0.5, AndryushkaArrowDemo::selectArrow);
+        on("guard2", 0.5, this::useArrow);
+        on("guard3", -0.8, client -> {
+            // Эти хаски живые: идут к игроку, а стрела встречает их на подходе.
+            int[][] spots = {{-7, 22}, {-2, 25}, {3, 23}, {8, 21}, {0, 28}};
+            for (int[] spot : spots) {
+                command(client, summon("husk", spot[0], spot[1], "PersistenceRequired:1b"));
+            }
+        });
+        on("guard4", -1.0, client -> command(client, summon("skeleton", 5, 11,
+                "PersistenceRequired:1b,ArmorItems:[{},{},{},{id:\"minecraft:leather_helmet\",count:1}]")));
+        on("guard6", 6.0, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void assist() {
+        on("assist", -0.3, client -> {
+            this.caption = Text.literal("Помогает в драке");
+            clearStage(client);
+        });
+        on("assist", 1.0, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("assist", 4.5, client -> this.look(0.0F, -35.0F));
+        on("assist", 5.5, AndryushkaArrowDemo::selectArrow);
+        on("assist", 6.5, this::useArrow);
+        on("assist", 7.5, client -> {
+            this.look(0.0F, VIEW_PITCH);
+            // Хаск висит прямо перед игроком — до него можно дотянуться рукой.
+            command(client, "summon minecraft:husk 0.5 " + (HOVER.y - 1.0) + " -0.4 {NoAI:1b,NoGravity:1b,"
+                    + "PersistenceRequired:1b,Rotation:[180.0f,0.0f]}");
+        });
+        on("assist2", 2.5, client -> this.lookAt(client, new Vec3d(0.5, HOVER.y + 0.2, -0.4)));
+        on("assist2", 4.0, this::punchNearestHusk);
+        on("assist3", 4.3, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void levels() {
+        on("level", -0.3, client -> {
+            this.caption = Text.literal("Прокачка: уровни с I по V");
+            clearStage(client);
+            this.look(0.0F, VIEW_PITCH);
+        });
+        on("level2", 0.0, client -> {
+            giveArrow(client, 14, "rainbow");
+            this.tooltip = Tooltip.ARROW;
+        });
+        on("level2", 9.8, client -> this.tooltip = Tooltip.NONE);
+        on("level3", 0.0, client -> command(client, mob("husk", 0, 7, "")));
+        on("level3", 1.0, client -> this.lookAt(client, new Vec3d(0.5, GROUND + 1.0, 7.5)));
+        on("level3", 3.2, AndryushkaArrowDemo::selectArrow);
+        on("level3", 4.0, this::useArrow);
+        on("level4", 5.6, client -> press(ArrowKeyBindings.WHISTLE));
+        on("level5", 0.0, client -> {
+            giveArrow(client, 149, "rainbow");
+            command(client, mob("husk", 0, 8, ""), mob("husk", -3, 7, ""), mob("husk", 3, 7, ""));
+            this.look(0.0F, VIEW_PITCH);
+        });
+        on("level5", 2.5, client -> this.lookAt(client, new Vec3d(0.5, GROUND + 1.0, 8.5)));
+        on("level5", 4.2, AndryushkaArrowDemo::selectArrow);
+        on("level5", 5.0, this::useArrow);
+        on("level6", 6.8, client -> press(ArrowKeyBindings.WHISTLE));
+        on("level7", 0.0, client -> {
+            this.look(0.0F, VIEW_PITCH);
+            this.tooltip = Tooltip.ARROW;
+        });
+        on("level7", 9.5, client -> this.tooltip = Tooltip.NONE);
+    }
+
+    private void combo() {
+        on("combo", -0.3, client -> {
+            this.caption = Text.literal("Серии побед — правило andryushkaArrowDamage 100");
+            clearStage(client);
+            command(client, "gamerule andryushkaArrowDamage 100");
+        });
+        on("combo", 1.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("combo", 2.0, client -> {
+            for (int i = 0; i < 10; i++) {
+                command(client, mob("husk", -2 + i % 5, 8 + i / 5, ""));
+            }
+        });
+        on("combo", 9.0, AndryushkaArrowDemo::selectArrow);
+        on("combo", 10.0, this::useArrow);
+        on("combo3", 6.0, client -> {
+            command(client, "gamerule andryushkaArrowDamage 8");
+            press(ArrowKeyBindings.WHISTLE);
+        });
+    }
+
+    private void grinder() {
+        on("grinder", -0.3, client -> {
+            this.caption = Text.literal("Мясорубка: 20 хасков и стрела V уровня");
+            clearStage(client);
+            for (int i = 0; i < 20; i++) {
+                double angle = 2 * Math.PI * i / 20;
+                command(client, mob("husk", (int) Math.round(Math.cos(angle) * 9), 9 + (int) Math.round(Math.sin(angle) * 8), ""));
+            }
+        });
+        on("grinder2", -1.8, AndryushkaArrowDemo::selectArrow);
+        on("grinder2", -1.0, this::useArrow);
+        on("grinder4", 2.5, client -> press(ArrowKeyBindings.WHISTLE));
+    }
+
+    private void trails() {
+        on("trail", -0.3, client -> {
+            this.caption = Text.literal("Цвет следа: стрела + краситель");
+            clearStage(client);
+        });
+        on("trail", 0.3, client -> openCrafting(client, new ItemStack[] {
+                ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY,
+                ItemStack.EMPTY, arrowStack(150, ArrowTrail.RAINBOW), new ItemStack(Items.RED_DYE),
+                ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY}));
+        on("trail", 3.0, client -> this.tooltip = Tooltip.CRAFT_RESULT);
+        on("trail2", 5.5, client -> {
+            this.tooltip = Tooltip.NONE;
+            closeCrafting(client);
+        });
+        for (String trail : TRAILS) {
+            on(trail, -0.2, client -> {
+                this.caption = Text.translatable("trail.andryushka_arrow." + trail);
+                giveArrow(client, 150, trail);
+                command(client, mob("husk", -3, 8, ""), mob("husk", 3, 10, ""));
+                this.look(0.0F, VIEW_PITCH);
+            });
+            on(trail, 0.5, AndryushkaArrowDemo::selectArrow);
+            on(trail, 1.0, this::useArrow);
+            on(trail, 8.6, client -> press(ArrowKeyBindings.WHISTLE));
+        }
+    }
+
+    private void advancements() {
+        on("advancements", -0.3, client -> {
+            this.caption = Text.literal("Своя вкладка достижений");
+            clearStage(client);
+        });
+        on("advancements", 0.3, client -> {
+            ClientAdvancementManager manager = client.getNetworkHandler().getAdvancementHandler();
+            client.setScreen(new AdvancementsScreen(manager));
+            AdvancementEntry root = manager.get(AndryushkaArrowMod.id("root"));
+            if (root != null) {
+                manager.selectTab(root, true);
+            }
+        });
+        on("advancements2", 4.5, client -> client.setScreen(null));
+    }
+
+    private void finale() {
+        on("rules", -0.3, client -> {
+            this.caption = Text.literal("Настройки — правила игры");
+            this.look(0.0F, VIEW_PITCH);
+        });
+        on("rules2", 0.3, client -> client.setScreen(new ChatScreen("/gamerule andryushkaArrowDuration 15")));
+        on("rules2", 4.8, client -> {
+            client.setScreen(null);
+            command(client, "gamerule andryushkaArrowDuration 15");
+            // Свежая стрела I уровня: у ветерана к 15 секундам добавились бы ещё 20.
+            giveArrow(client, 0, "rainbow");
+            for (int i = 0; i < 4; i++) {
+                command(client, mob("husk", -5 + i * 3, 9 + (i % 2) * 3, ""));
+            }
+        });
+        on("final", -0.8, AndryushkaArrowDemo::selectArrow);
+        on("final", -0.2, client -> {
+            this.caption = Text.literal("Финал: колокольчик, круг почёта и падение");
+            this.useArrow(client);
+        });
+        on("landed", 1.5, client -> server(client, server -> {
             // Игрок спускается к упавшей стреле и подбирает её.
-            ServerPlayerEntity player = server.getPlayerManager().getPlayerList().get(0);
+            ServerPlayerEntity player = player(server);
             List<ItemEntity> drops = player.getServerWorld().getEntitiesByClass(ItemEntity.class,
                     player.getBoundingBox().expand(24.0), item -> item.getStack().isOf(ModItems.ANDRYUSHKA_ARROW));
             if (!drops.isEmpty()) {
@@ -201,36 +538,99 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                 player.requestTeleport(drop.getX(), drop.getY(), drop.getZ() - 0.8);
             }
         }));
-        at(91.8, client -> this.caption = Text.literal("Стрела снова в инвентаре. Конец демонстрации"));
-        at(99.5, client -> {
-            mark("end");
-            this.closeSoundLog();
-            client.scheduleStop();
+        on("outro", -0.3, client -> {
+            command(client, "gamerule andryushkaArrowDuration 40",
+                    "tp @a " + HOVER.x + " " + HOVER.y + " " + HOVER.z + " 0 " + VIEW_PITCH);
+            server(client, server -> {
+                ServerPlayerEntity player = player(server);
+                player.getAbilities().flying = true;
+                player.sendAbilitiesUpdate();
+            });
+            this.caption = Text.literal("Спасибо за просмотр!");
+            this.look(-30.0F, 10.0F);
         });
-    }
-
-    private void at(double seconds, Consumer<MinecraftClient> action) {
-        this.script.add(new Step((int) Math.round(seconds * 20.0), action));
-    }
-
-    /** Волны мобов, чтобы стрела была занята все 40 секунд. */
-    private static void spawnWave(MinecraftClient client, int wave) {
-        int[][] spots = {
-                {-7, 6}, {8, 4}, {-4, 12}, {6, 14}, {0, 17},
-                {-9, 13}, {10, 9}, {-2, 15}, {5, 2}, {-8, 3},
-                {9, 15}, {-6, 17}, {2, 12}, {-10, 8}, {11, 12},
-        };
-        for (int i = wave * 5; i < wave * 5 + 5; i++) {
-            command(client, mob(i % 2 == 0 ? "husk" : "pig", spots[i][0], spots[i][1], null));
+        on("outro", 0.5, client -> this.pan(-30.0F, 30.0F, 28.0));
+        for (int i = 0; i < 6; i++) {
+            int x = -8 + i * 3;
+            on("outro2", i * 1.4, client -> command(client, firework(x, 10 + (x % 2) * 3)));
         }
     }
+
+    // ---------------------------------------------------------------- действия
 
     private static String mob(String type, int x, int z, String name) {
         String tags = "NoAI:1b,PersistenceRequired:1b";
-        if (name != null) {
+        if (!name.isEmpty()) {
             tags += ",CustomName:'\"" + name + "\"',CustomNameVisible:1b";
         }
-        return "summon minecraft:" + type + " " + (x + 0.5) + " -60 " + (z + 0.5) + " {" + tags + "}";
+        return summon(type, x, z, tags);
+    }
+
+    private static String summon(String type, int x, int z, String nbt) {
+        return "summon minecraft:" + type + " " + (x + 0.5) + " " + GROUND + " " + (z + 0.5) + " {" + nbt + "}";
+    }
+
+    private static String firework(int x, int z) {
+        return "summon minecraft:firework_rocket " + (x + 0.5) + " " + (GROUND + 1) + " " + (z + 0.5)
+                + " {LifeTime:28,FireworksItem:{id:\"minecraft:firework_rocket\",count:1,components:{"
+                + "\"minecraft:fireworks\":{flight_duration:1,explosions:[{shape:\"large_ball\","
+                + "colors:[I;16711680,16760576,65280,255,16711935],has_twinkle:1b,has_trail:1b}]}}}}";
+    }
+
+    private static String arrowId(int kills, String trail) {
+        return "andryushka_arrow:andryushka_arrow[andryushka_arrow:kills=" + kills + ",andryushka_arrow:trail=\"" + trail + "\"]";
+    }
+
+    /** Свежая стрела в первую ячейку — с нужным числом побед и цветом следа. */
+    private static void giveArrow(MinecraftClient client, int kills, String trail) {
+        command(client, "clear @a", "item replace entity @a hotbar.0 with " + arrowId(kills, trail));
+        server(client, server -> {
+            ServerPlayerEntity player = player(server);
+            player.getInventory().selectedSlot = 0;
+            player.networkHandler.sendPacket(new UpdateSelectedSlotS2CPacket(0));
+        });
+    }
+
+    private static ItemStack arrowStack(int kills, ArrowTrail trail) {
+        ItemStack stack = new ItemStack(ModItems.ANDRYUSHKA_ARROW);
+        stack.set(ModComponents.KILLS, kills);
+        stack.set(ModComponents.TRAIL, trail);
+        return stack;
+    }
+
+    /** Убирает мобов, предметы и стену; стрелу в полёте не трогает. */
+    private static void clearStage(MinecraftClient client) {
+        command(client,
+                "kill @e[type=!minecraft:player,type=!andryushka_arrow:andryushka_arrow]",
+                "fill -14 " + GROUND + " 2 14 " + (GROUND + 4) + " 30 minecraft:air");
+    }
+
+    /**
+     * Берёт в руку стрелу: после возврата она могла лечь не в первую ячейку (добыча успела занять
+     * её). Ищем на панели быстрого доступа, а если там нет — переносим из инвентаря в первую.
+     */
+    private static void selectArrow(MinecraftClient client) {
+        server(client, server -> {
+            ServerPlayerEntity player = player(server);
+            PlayerInventory inventory = player.getInventory();
+            int found = -1;
+            for (int slot = 0; slot < inventory.main.size() && found < 0; slot++) {
+                if (inventory.getStack(slot).isOf(ModItems.ANDRYUSHKA_ARROW)) {
+                    found = slot;
+                }
+            }
+            if (found < 0) {
+                return;
+            }
+            if (found >= PlayerInventory.getHotbarSize()) {
+                ItemStack first = inventory.getStack(0);
+                inventory.setStack(0, inventory.getStack(found));
+                inventory.setStack(found, first);
+                found = 0;
+            }
+            inventory.selectedSlot = found;
+            player.networkHandler.sendPacket(new UpdateSelectedSlotS2CPacket(found));
+        });
     }
 
     /** ПКМ с предметом в руке — тот же путь, что у игрока. */
@@ -241,9 +641,56 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         }
     }
 
+    /** Удар рукой по ближайшему хаску — свободная стрела приходит на помощь. */
+    private void punchNearestHusk(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        HuskEntity nearest = null;
+        for (HuskEntity husk : client.world.getEntitiesByClass(HuskEntity.class, player.getBoundingBox().expand(5.0),
+                husk -> husk.isAlive())) {
+            if (nearest == null || husk.squaredDistanceTo(player) < nearest.squaredDistanceTo(player)) {
+                nearest = husk;
+            }
+        }
+        if (nearest != null) {
+            client.interactionManager.attackEntity(player, nearest);
+            player.swingHand(Hand.MAIN_HAND);
+        }
+    }
+
     /** Нажатие клавиши: мод обработает его в своём обработчике тика, как настоящее. */
     private static void press(KeyBinding binding) {
         KeyBinding.onKeyPressed(KeyBindingHelper.getBoundKeyOf(binding));
+    }
+
+    /** Настоящий верстак с разложенным рецептом: сервер сам посчитает результат. */
+    private static void openCrafting(MinecraftClient client, ItemStack[] grid) {
+        server(client, server -> {
+            ServerPlayerEntity player = player(server);
+            ServerWorld world = player.getServerWorld();
+            world.setBlockState(TABLE, Blocks.CRAFTING_TABLE.getDefaultState());
+            player.openHandledScreen(new SimpleNamedScreenHandlerFactory((syncId, inventory, who) ->
+                    new CraftingScreenHandler(syncId, inventory, ScreenHandlerContext.create(world, TABLE)),
+                    Text.translatable("container.crafting")));
+            if (player.currentScreenHandler instanceof CraftingScreenHandler handler) {
+                for (int i = 0; i < grid.length; i++) {
+                    handler.getSlot(1 + i).setStack(grid[i].copy());
+                }
+            }
+        });
+    }
+
+    /** Закрывает верстак, предварительно убрав всё с сетки, чтобы ничего не выпало игроку. */
+    private static void closeCrafting(MinecraftClient client) {
+        server(client, server -> {
+            ServerPlayerEntity player = player(server);
+            if (player.currentScreenHandler instanceof CraftingScreenHandler handler) {
+                for (int i = 1; i <= 9; i++) {
+                    handler.getSlot(i).setStack(ItemStack.EMPTY);
+                }
+            }
+            player.closeHandledScreen();
+            player.getServerWorld().setBlockState(TABLE, Blocks.AIR.getDefaultState());
+        });
     }
 
     // ---------------------------------------------------------------- тик
@@ -260,10 +707,13 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         if (this.warmup < WARMUP_TICKS) {
             if (this.warmup == 0) {
                 client.getSoundManager().registerListener(this::onSoundPlayed);
+                // Все рецепты сразу: иначе посреди ролика всплывали бы «Новые рецепты».
+                command(client, "recipe give @a *");
             }
             if (this.warmup == SLOWDOWN_TICK && TICK_RATE != 20.0F) {
                 command(client, String.format(Locale.ROOT, "tick rate %.4f", TICK_RATE));
             }
+            client.getToastManager().clear();
             this.warmup++;
             return;
         }
@@ -273,12 +723,15 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                 step.action().accept(client);
             }
         }
-        // Всплывающие «Новое достижение» загораживают кадр.
-        client.getToastManager().clear();
+        // Достижения мода всплывают — это часть обзора; первые секунды чистим остатки от загрузки.
+        if (this.tick < 40) {
+            client.getToastManager().clear();
+        }
         this.steer(client);
         this.logLoopsAndCamera(client);
-        if (this.tick % 40 == 0) {
-            AndryushkaArrowMod.LOGGER.info("Демо: секунда {}, {} кадров/с", this.tick / 20, client.getCurrentFps());
+        if (this.tick % 200 == 0) {
+            AndryushkaArrowMod.LOGGER.info("Демо: секунда {} из {}, {} кадров/с", this.tick / 20, this.endTick / 20,
+                    client.getCurrentFps());
         }
     }
 
@@ -299,7 +752,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         rules.get(GameRules.DO_DAYLIGHT_CYCLE).set(false, null);
         rules.get(GameRules.DO_WEATHER_CYCLE).set(false, null);
         rules.get(GameRules.ANNOUNCE_ADVANCEMENTS).set(false, null);
-        // Иначе в чате видно, как сценарий замедляет игру командой /tick rate.
+        // Иначе в чате видно, как сценарий замедляет игру и раздаёт предметы.
         rules.get(GameRules.SEND_COMMAND_FEEDBACK).set(false, null);
         rules.get(GameRules.LOG_ADMIN_COMMANDS).set(false, null);
         LevelInfo info = new LevelInfo("andryushka-demo", GameMode.CREATIVE, false, Difficulty.EASY, true,
@@ -317,6 +770,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         this.lookYaw = yaw;
         this.lookPitch = pitch;
         this.steering = true;
+        this.panStart = -1;
     }
 
     private void lookAt(MinecraftClient client, Vec3d target) {
@@ -329,14 +783,28 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         this.look(yaw, pitch);
     }
 
+    /** Медленная панорама по горизонтали — для вступления и концовки. */
+    private void pan(float fromYaw, float toYaw, double seconds) {
+        this.panFrom = fromYaw;
+        this.panTo = toYaw;
+        this.panStart = this.tick;
+        this.panTicks = Math.max(1, (int) Math.round(seconds * 20.0));
+        this.steering = true;
+    }
+
     /**
      * Плавный поворот головы — чтобы в ролике не было рывков. Пока стрела охотится, камера
-     * смотрит на середину между ней и её целью, иначе — на общий план поля.
+     * смотрит на середину между ней и её целью, иначе — туда, куда велит сценарий.
      */
     private void steer(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
-        if (!this.steering) {
+        if (!this.steering || client.currentScreen != null) {
             return;
+        }
+        if (this.panStart >= 0) {
+            float t = MathHelper.clamp((this.tick - this.panStart) / (float) this.panTicks, 0.0F, 1.0F);
+            float eased = t * t * (3.0F - 2.0F * t);
+            this.lookYaw = MathHelper.lerp(eased, this.panFrom, this.panTo);
         }
         float wantYaw = this.lookYaw;
         float wantPitch = this.lookPitch;
@@ -364,23 +832,53 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         player.setBodyYaw(yaw);
     }
 
-    // ---------------------------------------------------------------- подписи
+    // ---------------------------------------------------------------- надписи поверх игры
 
-    private void renderCaption(DrawContext context, RenderTickCounter tickCounter) {
-        if (this.tick < 0 || this.caption.getString().isEmpty()) {
+    private void renderOverlay(DrawContext context, RenderTickCounter tickCounter) {
+        if (this.tick < 0) {
             return;
         }
         MinecraftClient client = MinecraftClient.getInstance();
         TextRenderer font = client.textRenderer;
-        float scale = 1.25F;
-        int width = Math.round(font.getWidth(this.caption) * scale);
-        int centerX = context.getScaledWindowWidth() / 2;
-        context.fill(centerX - width / 2 - 8, 6, centerX + width / 2 + 8, 6 + Math.round(9 * scale) + 8, 0xA0101018);
-        context.getMatrices().push();
-        context.getMatrices().translate(centerX, 10.0F, 0.0F);
-        context.getMatrices().scale(scale, scale, 1.0F);
-        context.drawCenteredTextWithShadow(font, this.caption, 0, 0, 0xFFFFFF);
-        context.getMatrices().pop();
+        if (!this.caption.getString().isEmpty()) {
+            float scale = 1.25F;
+            int width = Math.round(font.getWidth(this.caption) * scale);
+            int centerX = context.getScaledWindowWidth() / 2;
+            context.fill(centerX - width / 2 - 8, 6, centerX + width / 2 + 8, 6 + Math.round(9 * scale) + 8, 0xA0101018);
+            context.getMatrices().push();
+            context.getMatrices().translate(centerX, 10.0F, 0.0F);
+            context.getMatrices().scale(scale, scale, 1.0F);
+            context.drawCenteredTextWithShadow(font, this.caption, 0, 0, 0xFFFFFF);
+            context.getMatrices().pop();
+        }
+        if (this.tooltip == Tooltip.ARROW && client.player != null) {
+            ItemStack arrow = findArrow(client.player.getInventory());
+            if (!arrow.isEmpty()) {
+                context.drawItemTooltip(font, arrow, 12, 50);
+            }
+        }
+    }
+
+    /** На экране верстака — подсказка к результату крафта, как при наведении мыши. */
+    private void renderScreenOverlay(Screen screen, DrawContext context, int mouseX, int mouseY, float tickDelta) {
+        if (this.tooltip != Tooltip.CRAFT_RESULT || !(screen instanceof CraftingScreen crafting)) {
+            return;
+        }
+        ItemStack result = crafting.getScreenHandler().getSlot(0).getStack();
+        if (!result.isEmpty()) {
+            int x = (screen.width - 176) / 2 + 124 + 8;
+            int y = (screen.height - 166) / 2 + 35 + 8;
+            context.drawItemTooltip(MinecraftClient.getInstance().textRenderer, result, x, y);
+        }
+    }
+
+    private static ItemStack findArrow(PlayerInventory inventory) {
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (inventory.getStack(slot).isOf(ModItems.ANDRYUSHKA_ARROW)) {
+                return inventory.getStack(slot);
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     // ---------------------------------------------------------------- журнал звуков
@@ -460,6 +958,10 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
     }
 
     // ---------------------------------------------------------------- служебное
+
+    private static ServerPlayerEntity player(MinecraftServer server) {
+        return server.getPlayerManager().getPlayerList().get(0);
+    }
 
     private static void server(MinecraftClient client, Consumer<MinecraftServer> action) {
         MinecraftServer server = client.getServer();

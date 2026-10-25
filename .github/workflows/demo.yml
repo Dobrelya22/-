@@ -1,15 +1,26 @@
 name: demo
 
-# Записывает демонстрационный ролик мода: настоящий клиент Minecraft на виртуальном экране,
-# 60 кадров в секунду, звуки игры и закадровый голос. Запись идёт около 40 минут, поэтому
-# запускается вручную: Actions → demo → Run workflow.
+# Записывает обзорный ролик мода: настоящий клиент Minecraft на виртуальном экране, 60 кадров
+# в секунду, звуки игры и закадровый голос. Запись долгая (около часа на 10 минут ролика), поэтому
+# запускается вручную: Actions → demo → Run workflow. Готовый ролик выкладывается в релиз «review».
 on:
   workflow_dispatch:
+    inputs:
+      dilation:
+        description: 'Во сколько раз замедлить игру при записи (больше — плавнее, но дольше)'
+        default: '6'
+      capture_fps:
+        description: 'Кадров в секунду при захвате экрана'
+        default: '12'
+      publish:
+        description: 'Выложить ролик в релиз «review»'
+        type: boolean
+        default: true
 
 jobs:
   narration:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -21,26 +32,38 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install piper-tts==1.2.0 numpy
-          for ref in v1.0.0 main; do
-            base=https://huggingface.co/rhasspy/piper-voices/resolve/$ref/ru/ru_RU/ruslan/medium
-            curl -sSfL -o voice.onnx "$base/ru_RU-ruslan-medium.onnx" \
-              && curl -sSfL -o voice.onnx.json "$base/ru_RU-ruslan-medium.onnx.json" && break
-          done
-          python tools/demo/narration.py voice.onnx tools/demo/narration.txt narration.wav
+          mkdir -p narration
+          pip install numpy
+          # Основной голос — Silero (xenia), запасной — Piper (irina).
+          if pip install torch --index-url https://download.pytorch.org/whl/cpu \
+              && curl -sSfL -o silero.pt https://models.silero.ai/models/tts/ru/v5_6_ru.pt \
+              && python tools/demo/narration.py --engine silero --model silero.pt --speaker xenia --voice anime \
+                   tools/demo/narration.txt narration/narration.wav; then
+            echo "Голос: Silero xenia"
+          else
+            pip install piper-tts==1.2.0
+            base=https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/irina/medium
+            curl -sSfL -o voice.onnx "$base/ru_RU-irina-medium.onnx"
+            curl -sSfL -o voice.onnx.json "$base/ru_RU-irina-medium.onnx.json"
+            python tools/demo/narration.py --engine piper --model voice.onnx --voice anime \
+              tools/demo/narration.txt narration/narration.wav
+            echo "Голос: Piper irina"
+          fi
+          cat narration/narration-timing.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: andryushka-arrow-narration
-          path: narration.wav
+          path: narration/
 
   record:
     needs: narration
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 330
     env:
-      DEMO_DILATION: 15
+      DEMO_DILATION: ${{ inputs.dilation }}
+      DEMO_CAPTURE_FPS: ${{ inputs.capture_fps }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +91,7 @@ jobs:
           path: narration
 
       - name: Запись ролика
-        run: tools/demo/record.sh build/demo narration/narration.wav
+        run: tools/demo/record.sh build/demo narration/narration.wav narration/narration-timing.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -76,11 +99,12 @@ jobs:
           name: andryushka-arrow-demo
           path: build/demo/
 
-      # Несколько кадров прямо в логе — чтобы проверить ролик, не скачивая его.
+      # Кадры каждые 20 секунд прямо в логе — чтобы проверить ролик, не скачивая его.
       - name: Кадры для проверки
         if: always()
         run: |
-          for t in 1 5 12 16.5 19 24 29 32 34 39 46 53 57 63 70 76 81 85 88 90 95; do
+          duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 build/demo/andryushka-arrow-demo.mp4 || echo 0)
+          for t in $(seq 2 20 "${duration%.*}"); do
             if ffmpeg -loglevel error -y -ss "$t" -i build/demo/andryushka-arrow-demo.mp4 -frames:v 1 \
                  -vf scale=640:-2 -q:v 7 /tmp/frame.jpg; then
               echo "FRAME $t $(base64 -w0 /tmp/frame.jpg)"
@@ -89,54 +113,45 @@ jobs:
 
       - name: Журнал игры
         if: always()
-        run: grep -E "ERROR|Exception|andryushka|Демо" build/demo/latest.log | head -150 || true
+        run: grep -E "ERROR|Exception|andryushka|Демо" build/demo/latest.log | head -200 || true
 
-  # Облегчённая копия ролика текстом в логах: её можно забрать без доступа к хранилищу артефактов.
-  compress:
+  # Ролик в релиз «review»: полный 720p и лёгкий 540p, чтобы его было удобно скачать и переслать.
+  publish:
     needs: record
+    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: andryushka-arrow-demo
           path: demo
 
-      - name: Сжатие до 20 МБ
+      - name: Выпуск
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 demo/andryushka-arrow-demo.mp4)
-          video_kbps=$(python3 -c "print(int(20 * 8 * 1024 * 1024 / $duration / 1000) - 128)")
+          mkdir -p dist
+          cp demo/andryushka-arrow-demo.mp4 dist/andryushka-arrow-review-720p60.mp4
+          # Лёгкая версия: 960×540, 60 кадров, около 1,6 Мбит/с.
           for pass in 1 2; do
-            output=small.mp4; [ "$pass" = 1 ] && output=/dev/null
+            output=dist/andryushka-arrow-review-540p60.mp4; [ "$pass" = 1 ] && output=/dev/null
             ffmpeg -loglevel error -y -i demo/andryushka-arrow-demo.mp4 -vf scale=960:-2 -r 60 \
-              -c:v libx264 -preset slow -b:v "${video_kbps}k" -pass "$pass" -pix_fmt yuv420p \
+              -c:v libx264 -preset slow -b:v 1450k -pass "$pass" -pix_fmt yuv420p \
               -c:a aac -b:a 128k -movflags +faststart -f mp4 "$output"
           done
-          ls -l small.mp4
-          sha256sum small.mp4
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: andryushka-arrow-demo-small
-          path: small.mp4
-
-  share:
-    needs: compress
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        part: [0, 1, 2, 3, 4]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: andryushka-arrow-demo-small
-
-      - name: Часть ролика в логе
-        run: |
-          size=$(stat -c %s small.mp4)
-          chunk=$(( (size + 4) / 5 ))
-          offset=$(( ${{ matrix.part }} * chunk ))
-          length=$(( size - offset < chunk ? size - offset : chunk ))
-          echo "VIDEO-BEGIN ${{ matrix.part }} $offset $length $size"
-          tail -c +$(( offset + 1 )) small.mp4 | head -c "$length" | base64 -w 60000 | sed 's/^/VIDEO /'
-          echo "VIDEO-END"
+          ls -l dist
+          notes="Обзор мода «Стрела Андрюшки»: 60 кадров в секунду, звуки игры и закадровый голос (Silero TTS, CC BY-NC 4.0 — только для некоммерческого использования)."
+          if gh release view review >/dev/null 2>&1; then
+            gh release upload review dist/*.mp4 --clobber
+          else
+            gh release create review dist/*.mp4 --prerelease --target "$GITHUB_SHA" \
+              --title "Обзор мода «Стрела Андрюшки»" --notes "$notes"
+          fi
+          for f in dist/*.mp4; do
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/review/$(basename "$f")"
+          done

@@ -28,7 +28,7 @@ jobs:
           path: build/libs/andryushka-arrow-*.jar
 
       - name: Полная сборка
-        run: ./gradlew build --stacktrace
+        run: ./gradlew build demoClasses --stacktrace
 
       - name: Игровые тесты
         run: ./gradlew runGametest --stacktrace
