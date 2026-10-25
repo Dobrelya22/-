@@ -1,12 +1,18 @@
 package com.andryushka.arrow.client;
 
+import com.andryushka.arrow.ArrowLevel;
 import com.andryushka.arrow.ArrowMode;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
+import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModItems;
 import java.util.UUID;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
 import org.jetbrains.annotations.Nullable;
 
 /** Что клиент знает о своей стреле: режим, летящая стрела и есть ли она в инвентаре. */
@@ -20,7 +26,17 @@ public final class ClientArrowState {
     private static boolean hasArrowItem;
     private static int trackedArrowId = -1;
     private static int trackedKills;
+    private static int trackedCombo;
+    private static int trackedLevel;
     private static long killedAt = LONG_AGO;
+    /** Наибольший уровень среди стрел в инвентаре — для надписи, пока стрела не летит. */
+    private static int itemLevel = 1;
+    @Nullable
+    private static Popup popup;
+
+    /** Крупная надпись над прицелом: серия побед или новый уровень стрелы. */
+    public record Popup(Text title, @Nullable Text subtitle, boolean levelUp, long startedAt) {
+    }
 
     private ClientArrowState() {
     }
@@ -70,6 +86,16 @@ public final class ClientArrowState {
         return hasArrowItem;
     }
 
+    /** Уровень стрелы для надписи: летящей, а если она не летит — лучшей из инвентаря. */
+    public static int level() {
+        return activeArrow != null ? activeArrow.getLevel() : itemLevel;
+    }
+
+    @Nullable
+    public static Popup popup() {
+        return popup;
+    }
+
     public static void tick(MinecraftClient client) {
         activeArrow = null;
         hasArrowItem = false;
@@ -83,28 +109,53 @@ public final class ClientArrowState {
                 activeArrow = arrow;
             }
         }
-        trackKills();
+        trackProgress(client);
+        itemLevel = 1;
         PlayerInventory inventory = client.player.getInventory();
         for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(ModItems.ANDRYUSHKA_ARROW)) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isOf(ModItems.ANDRYUSHKA_ARROW)) {
                 hasArrowItem = true;
-                break;
+                itemLevel = Math.max(itemLevel, ArrowLevel.of(stack.getOrDefault(ModComponents.KILLS, 0)));
             }
         }
     }
 
-    private static void trackKills() {
+    /** Победы, серии и уровень летящей стрелы: на каждое изменение — вспышка счётчика или надпись. */
+    private static void trackProgress(MinecraftClient client) {
         if (activeArrow == null) {
             trackedArrowId = -1;
             return;
         }
         int kills = activeArrow.getKills();
-        if (activeArrow.getId() != trackedArrowId) {
-            trackedArrowId = activeArrow.getId();
-        } else if (kills > trackedKills) {
-            killedAt = gameMillis();
+        int combo = activeArrow.getCombo();
+        int level = activeArrow.getLevel();
+        if (activeArrow.getId() == trackedArrowId) {
+            if (kills > trackedKills) {
+                killedAt = gameMillis();
+            }
+            if (combo > trackedCombo && combo >= 2) {
+                showCombo(client, combo);
+            }
+            if (level > trackedLevel) {
+                popup = new Popup(Text.translatable("popup.andryushka_arrow.level", ArrowLevel.roman(level)),
+                        Text.translatable("popup.andryushka_arrow.level.subtitle"), true, gameMillis());
+            }
         }
+        trackedArrowId = activeArrow.getId();
         trackedKills = kills;
+        trackedCombo = combo;
+        trackedLevel = level;
+    }
+
+    private static void showCombo(MinecraftClient client, int combo) {
+        Text title = combo <= 5
+                ? Text.translatable("popup.andryushka_arrow.combo." + combo)
+                : Text.translatable("popup.andryushka_arrow.combo.more", combo);
+        popup = new Popup(title, null, false, gameMillis());
+        // С каждой победой серии звон выше.
+        float pitch = Math.min(2.0F, 0.85F + 0.18F * combo);
+        client.getSoundManager().play(PositionedSoundInstance.master(SoundEvents.BLOCK_NOTE_BLOCK_PLING.value(), pitch));
     }
 
     public static void reset() {
@@ -112,6 +163,8 @@ public final class ClientArrowState {
         modeChangedAt = LONG_AGO;
         killedAt = LONG_AGO;
         trackedArrowId = -1;
+        popup = null;
+        itemLevel = 1;
         activeArrow = null;
         hasArrowItem = false;
     }

@@ -1,5 +1,6 @@
 package com.andryushka.arrow.client;
 
+import com.andryushka.arrow.ArrowLevel;
 import com.andryushka.arrow.ArrowMode;
 import com.andryushka.arrow.Rainbow;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
@@ -20,6 +21,9 @@ public final class ArrowHud {
     private static final String ICON = "➶";
     private static final long MODE_FLASH_MILLIS = 600L;
     private static final long KILL_FLASH_MILLIS = 500L;
+    private static final long POPUP_MILLIS = 1600L;
+    private static final long POPUP_APPEAR_MILLIS = 140L;
+    private static final long POPUP_FADE_MILLIS = 350L;
     private static final int BAR_WIDTH = 81;
 
     private ArrowHud() {
@@ -44,11 +48,53 @@ public final class ArrowHud {
         int iconColor = Rainbow.hsvToRgb((now % 3000L) / 3000.0F, 0.8F, 1.0F);
         context.drawTextWithShadow(font, Text.literal(ICON), left, y, iconColor);
         int x = left + font.getWidth(ICON) + 3;
+        int level = ClientArrowState.level();
+        if (level > 1) {
+            String roman = ArrowLevel.roman(level);
+            context.drawTextWithShadow(font, Text.literal(roman), x, y, 0xFFC830);
+            x += font.getWidth(roman) + 4;
+        }
         context.drawTextWithShadow(font, line(arrow, now), x, y, 0xFFFFFF);
+        drawPopup(context, font, now);
 
         if (arrow != null && (arrow.getStatus() == AndryushkaArrowEntity.STATUS_HUNTING
                 || arrow.getStatus() == AndryushkaArrowEntity.STATUS_WAITING)) {
             drawTimeBar(context, left, y - 5, arrow, now);
+        }
+    }
+
+    /**
+     * Надпись серии или нового уровня над прицелом: выскакивает крупной, чуть сжимается
+     * и гаснет. Серии переливаются, новый уровень — золотой.
+     */
+    private static void drawPopup(DrawContext context, TextRenderer font, long now) {
+        ClientArrowState.Popup popup = ClientArrowState.popup();
+        if (popup == null) {
+            return;
+        }
+        long age = now - popup.startedAt();
+        if (age < 0L || age >= POPUP_MILLIS) {
+            return;
+        }
+        float appear = Math.min(1.0F, age / (float) POPUP_APPEAR_MILLIS);
+        float scale = 2.6F - 0.8F * (1.0F - (1.0F - appear) * (1.0F - appear));
+        float alpha = Math.min(1.0F, (POPUP_MILLIS - age) / (float) POPUP_FADE_MILLIS);
+        int alphaBits = Math.round(alpha * 255.0F);
+        if (alphaBits < 8) {
+            // Почти прозрачный текст рисуется непрозрачным — просто не рисуем.
+            return;
+        }
+        int rgb = popup.levelUp() ? 0xFFC830 : Rainbow.hsvToRgb(now / 500.0F, 0.6F, 1.0F);
+        int centerX = context.getScaledWindowWidth() / 2;
+        int centerY = context.getScaledWindowHeight() / 2 - 46;
+        context.getMatrices().push();
+        context.getMatrices().translate(centerX, centerY, 0.0F);
+        context.getMatrices().scale(scale, scale, 1.0F);
+        context.drawCenteredTextWithShadow(font, popup.title(), 0, -4, (alphaBits << 24) | rgb);
+        context.getMatrices().pop();
+        if (popup.subtitle() != null) {
+            context.drawCenteredTextWithShadow(font, popup.subtitle(), centerX, centerY + 14,
+                    (alphaBits << 24) | 0xFFE9A0);
         }
     }
 

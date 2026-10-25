@@ -1,11 +1,15 @@
 package com.andryushka.arrow.gametest;
 
+import com.andryushka.arrow.ArrowLevel;
 import com.andryushka.arrow.ArrowMode;
+import com.andryushka.arrow.ArrowTrail;
 import com.andryushka.arrow.AndryushkaArrowMod;
 import com.andryushka.arrow.entity.ArrowPathfinder;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
 import com.andryushka.arrow.entity.TargetRules;
+import com.andryushka.arrow.recipe.TrailDyeRecipe;
 import com.andryushka.arrow.registry.ModAdvancements;
+import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModEntities;
 import com.andryushka.arrow.registry.ModGameRules;
 import com.andryushka.arrow.registry.ModItems;
@@ -33,6 +37,8 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.recipe.book.CraftingRecipeCategory;
+import net.minecraft.recipe.input.CraftingRecipeInput;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.stat.Stats;
@@ -314,6 +320,114 @@ public class AndryushkaArrowGameTests implements FabricGameTest {
                 });
     }
 
+    @GameTest(templateName = ARENA, batchId = "andryushka_levels")
+    public void levelsFollowKills(TestContext context) {
+        prepareArena(context);
+        context.assertTrue(ArrowLevel.of(0) == 1 && ArrowLevel.of(14) == 1, "До 15 побед — первый уровень");
+        context.assertTrue(ArrowLevel.of(15) == 2 && ArrowLevel.of(39) == 2, "15 побед — второй уровень");
+        context.assertTrue(ArrowLevel.of(150) == 5 && ArrowLevel.of(100000) == 5, "Выше пятого уровня нет");
+        context.assertTrue(ArrowLevel.extraSeconds(5) == 20 && ArrowLevel.extraDamage(5) == 4.0F, "Бонусы пятого уровня");
+        context.complete();
+    }
+
+    /** Стрела пятого уровня летает на 20 секунд дольше. */
+    @GameTest(templateName = ARENA, batchId = "andryushka_veteran")
+    public void veteranArrowFliesLonger(TestContext context) {
+        prepareArena(context);
+        ServerPlayerEntity owner = createOwner(context);
+        ItemStack veteran = new ItemStack(ModItems.ANDRYUSHKA_ARROW);
+        veteran.set(ModComponents.KILLS, 150);
+        AndryushkaArrowEntity arrow = AndryushkaArrowEntity.launch(context.getWorld(), owner, veteran, ArrowMode.ALL, null);
+        context.assertTrue(arrow.getLevel() == 5, "Уровень не 5: " + arrow.getLevel());
+        context.assertTrue(arrow.getMaxLife() == 60 * 20, "Полёт не 60 секунд: " + arrow.getMaxLife());
+        arrow.discard();
+        context.complete();
+    }
+
+    /** Победа записывается в предмет; пятнадцатая поднимает уровень и продлевает полёт на 5 секунд. */
+    @GameTest(templateName = ARENA, batchId = "andryushka_level_up", tickLimit = 600)
+    public void killsLevelUpTheArrowItem(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        clearInventory(owner.getInventory());
+        ItemStack stack = new ItemStack(ModItems.ANDRYUSHKA_ARROW);
+        stack.set(ModComponents.KILLS, 14);
+        HuskEntity husk = spawnStillHusk(context, at(6, 2, 6));
+        AndryushkaArrowEntity arrow = AndryushkaArrowEntity.launch(world, owner, stack, ArrowMode.TARGET, husk);
+        succeedWhen(context, 600, 100, () -> !husk.isAlive(), () -> {
+            context.assertTrue(arrow.getLevel() == 2, "Уровень не поднялся: " + arrow.getLevel());
+            context.assertTrue(arrow.getMaxLife() == 45 * 20, "Полёт не продлился: " + arrow.getMaxLife());
+            arrow.returnToOwner(owner, false);
+            ItemStack returned = findArrow(owner.getInventory());
+            context.assertTrue(returned.getOrDefault(ModComponents.KILLS, 0) == 15,
+                    "В предмете не 15 побед: " + returned.getOrDefault(ModComponents.KILLS, 0));
+        }, () -> describe(context, arrow) + " | хаск " + describe(context, husk), () -> { });
+    }
+
+    /** Творческий режим: летит копия, а её победы записываются в предмет в инвентаре по номеру стрелы. */
+    @GameTest(templateName = ARENA, batchId = "andryushka_creative_copy", tickLimit = 600)
+    public void creativeCopySavesKillsToHeldArrow(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        ServerPlayerEntity owner = createOwner(context);
+        clearInventory(owner.getInventory());
+        ItemStack held = new ItemStack(ModItems.ANDRYUSHKA_ARROW);
+        held.set(ModComponents.ARROW_ID, UUID.randomUUID());
+        held.set(ModComponents.KILLS, 3);
+        owner.getInventory().setStack(0, held);
+        HuskEntity husk = spawnStillHusk(context, at(6, 2, 6));
+        AndryushkaArrowEntity arrow = AndryushkaArrowEntity.launch(world, owner, held.copyWithCount(1),
+                ArrowMode.TARGET, husk, false);
+        succeedWhen(context, 600, 100, () -> !husk.isAlive(), () -> {
+            arrow.returnToOwner(owner, false);
+            context.assertTrue(countItems(owner.getInventory(), ModItems.ANDRYUSHKA_ARROW) == 1, "Копия стрелы попала в инвентарь");
+            context.assertTrue(held.getOrDefault(ModComponents.KILLS, 0) == 4,
+                    "Победа не записалась в предмет: " + held.getOrDefault(ModComponents.KILLS, 0));
+        }, () -> describe(context, arrow) + " | хаск " + describe(context, husk), () -> { });
+    }
+
+    /** Стрела + краситель: другой след, победы на месте; лишний предмет ломает рецепт. */
+    @GameTest(templateName = ARENA, batchId = "andryushka_trail_dye")
+    public void dyeChangesTrailAndKeepsKills(TestContext context) {
+        prepareArena(context);
+        TrailDyeRecipe recipe = new TrailDyeRecipe(CraftingRecipeCategory.MISC);
+        ItemStack arrow = new ItemStack(ModItems.ANDRYUSHKA_ARROW);
+        arrow.set(ModComponents.KILLS, 42);
+        CraftingRecipeInput input = CraftingRecipeInput.create(2, 1, List.of(arrow, new ItemStack(Items.RED_DYE)));
+        context.assertTrue(recipe.matches(input, context.getWorld()), "Стрела + красный краситель не подходят");
+        ItemStack result = recipe.craft(input, context.getWorld().getRegistryManager());
+        context.assertTrue(result.get(ModComponents.TRAIL) == ArrowTrail.FIRE, "След не стал пламенем: " + result.get(ModComponents.TRAIL));
+        context.assertTrue(result.getOrDefault(ModComponents.KILLS, 0) == 42, "Победы потерялись");
+        CraftingRecipeInput twoDyes = CraftingRecipeInput.create(3, 1,
+                List.of(arrow, new ItemStack(Items.RED_DYE), new ItemStack(Items.BLUE_DYE)));
+        context.assertTrue(!recipe.matches(twoDyes, context.getWorld()), "Два красителя не должны подходить");
+        context.complete();
+    }
+
+    /** Быстрые победы подряд складываются в серию. */
+    @GameTest(templateName = ARENA, batchId = "andryushka_combo", tickLimit = 600)
+    public void quickKillsMakeACombo(TestContext context) {
+        prepareArena(context);
+        ServerWorld world = context.getWorld();
+        world.getGameRules().get(ModGameRules.DAMAGE).set(100, world.getServer());
+        ServerPlayerEntity owner = createOwner(context);
+        List<HuskEntity> crowd = List.of(spawnStillHusk(context, at(6, 2, 6)), spawnStillHusk(context, at(7, 2, 6)),
+                spawnStillHusk(context, at(6, 2, 7)), spawnStillHusk(context, at(7, 2, 7)));
+        AndryushkaArrowEntity arrow = AndryushkaArrowEntity.launch(world, owner, new ItemStack(ModItems.ANDRYUSHKA_ARROW),
+                ArrowMode.ALL, null);
+        int[] bestCombo = {0};
+        succeedWhen(context, 600, 100, () -> {
+            bestCombo[0] = Math.max(bestCombo[0], arrow.getCombo());
+            return crowd.stream().noneMatch(HuskEntity::isAlive);
+        }, () -> context.assertTrue(bestCombo[0] >= 2, "Серии не было: " + bestCombo[0]),
+                () -> describe(context, arrow) + " | серия " + bestCombo[0],
+                () -> {
+                    arrow.discard();
+                    world.getGameRules().get(ModGameRules.DAMAGE).set(8, world.getServer());
+                });
+    }
+
     /** Добыча сражённого моба прилетает в инвентарь владельца; победа идёт в статистику. */
     @GameTest(templateName = ARENA, batchId = "andryushka_loot", tickLimit = 600)
     public void lootFliesToOwner(TestContext context) {
@@ -471,6 +585,15 @@ public class AndryushkaArrowGameTests implements FabricGameTest {
         for (int slot = 0; slot < inventory.size(); slot++) {
             inventory.setStack(slot, ItemStack.EMPTY);
         }
+    }
+
+    private static ItemStack findArrow(PlayerInventory inventory) {
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (inventory.getStack(slot).isOf(ModItems.ANDRYUSHKA_ARROW)) {
+                return inventory.getStack(slot);
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     private static int countItems(PlayerInventory inventory, Item item) {

@@ -2,9 +2,11 @@ package com.andryushka.arrow;
 
 import com.andryushka.arrow.network.ArrowNetworking;
 import com.andryushka.arrow.registry.ModAttachments;
+import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModEntities;
 import com.andryushka.arrow.registry.ModGameRules;
 import com.andryushka.arrow.registry.ModItems;
+import com.andryushka.arrow.registry.ModRecipes;
 import com.andryushka.arrow.registry.ModSounds;
 import com.andryushka.arrow.registry.ModStats;
 import net.fabricmc.api.ModInitializer;
@@ -23,11 +25,13 @@ public class AndryushkaArrowMod implements ModInitializer {
     @Override
     public void onInitialize() {
         ModSounds.init();
+        ModComponents.init();
         ModEntities.init();
         ModItems.init();
         ModAttachments.init();
         ModGameRules.init();
         ModStats.init();
+        ModRecipes.init();
         ArrowNetworking.init();
         ArrowControl.init();
         LootDelivery.init();

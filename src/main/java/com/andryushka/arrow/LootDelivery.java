@@ -36,7 +36,7 @@ public final class LootDelivery {
     /** Только что выпавшее — чтобы не утащить чужие вещи, лежавшие рядом. */
     private static final int FRESH_AGE = 4;
 
-    private record Sweep(RegistryKey<World> world, Box area, UUID owner, long dueTick) {
+    private record Sweep(RegistryKey<World> world, Box area, UUID owner, ArrowTrail trail, long dueTick) {
     }
 
     private static final List<Sweep> PENDING = new ArrayList<>();
@@ -50,13 +50,13 @@ public final class LootDelivery {
     }
 
     /** Вызывается сразу после победы: предметы уже выпали, опыт проверим ещё раз попозже. */
-    public static void deliver(ServerWorld world, Box deathArea, ServerPlayerEntity owner) {
+    public static void deliver(ServerWorld world, Box deathArea, ServerPlayerEntity owner, ArrowTrail trail) {
         if (!world.getGameRules().getBoolean(ModGameRules.BRINGS_LOOT)) {
             return;
         }
         Box area = deathArea.expand(1.5);
-        sweep(world, area, owner);
-        PENDING.add(new Sweep(world.getRegistryKey(), area, owner.getUuid(), world.getTime() + LATE_SWEEP_TICKS));
+        sweep(world, area, owner, trail);
+        PENDING.add(new Sweep(world.getRegistryKey(), area, owner.getUuid(), trail, world.getTime() + LATE_SWEEP_TICKS));
     }
 
     private static void tick(MinecraftServer server) {
@@ -74,12 +74,12 @@ public final class LootDelivery {
             iterator.remove();
             ServerPlayerEntity owner = server.getPlayerManager().getPlayer(sweep.owner());
             if (owner != null && owner.getWorld() == world && owner.isAlive()) {
-                sweep(world, sweep.area(), owner);
+                sweep(world, sweep.area(), owner, sweep.trail());
             }
         }
     }
 
-    private static void sweep(ServerWorld world, Box area, ServerPlayerEntity owner) {
+    private static void sweep(ServerWorld world, Box area, ServerPlayerEntity owner, ArrowTrail trail) {
         List<ItemEntity> items = world.getEntitiesByClass(ItemEntity.class, area, item -> item.age <= FRESH_AGE);
         List<ExperienceOrbEntity> orbs = world.getEntitiesByClass(ExperienceOrbEntity.class, area,
                 orb -> orb.age <= FRESH_AGE);
@@ -109,7 +109,7 @@ public final class LootDelivery {
             orb.setPosition(feet.x, feet.y + 0.3, feet.z);
             orb.setVelocity(Vec3d.ZERO);
         }
-        beam(world, area.getCenter(), owner.getPos().add(0.0, owner.getHeight() * 0.6, 0.0));
+        beam(world, area.getCenter(), owner.getPos().add(0.0, owner.getHeight() * 0.6, 0.0), trail);
         world.playSound(null, feet.x, feet.y, feet.z, SoundEvents.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS,
                 0.35F, 1.6F + world.getRandom().nextFloat() * 0.3F);
         if (!items.isEmpty()) {
@@ -117,15 +117,15 @@ public final class LootDelivery {
         }
     }
 
-    /** Радужная дорожка искр от места победы к владельцу. */
-    private static void beam(ServerWorld world, Vec3d from, Vec3d to) {
+    /** Дорожка искр цвета следа от места победы к владельцу. */
+    private static void beam(ServerWorld world, Vec3d from, Vec3d to, ArrowTrail trail) {
         Vec3d delta = to.subtract(from);
         int points = Math.min(80, Math.max(6, (int) (delta.length() * 2.0)));
         float hueStart = world.getRandom().nextFloat();
         for (int i = 0; i <= points; i++) {
             double t = i / (double) points;
             Vec3d point = from.add(delta.multiply(t));
-            Vector3f color = Rainbow.toVector(Rainbow.hsvToRgb(hueStart + (float) t, 0.8F, 1.0F));
+            Vector3f color = Rainbow.toVector(trail.color(hueStart + (float) t, 0.8F));
             world.spawnParticles(new DustParticleEffect(color, 0.7F), point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0);
         }
     }

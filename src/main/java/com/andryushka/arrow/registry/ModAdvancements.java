@@ -16,6 +16,8 @@ public final class ModAdvancements {
     public static final String STREAK_10 = "streak_10";
     public static final String STREAK_25 = "streak_25";
     public static final String LOOT = "loot";
+    public static final String UNSTOPPABLE = "unstoppable";
+    public static final String MASTER = "master";
     private static final String CRITERION = "done";
 
     private ModAdvancements() {
