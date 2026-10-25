@@ -407,6 +407,7 @@ class Segment:
     number: str = ""
     title: str = ""
     game_gain: float = 1.0
+    track_gain: float = 1.0   # поправка громкости только этой сцены, поверх общей для дубля
     base_zoom: float = 1.0
     zoom_at: tuple = (W / 2, H / 2)
     music_gain: float = 0.0
@@ -465,7 +466,7 @@ def plan(log, takes):
     streak_len, fire_len = 25.0, 10.0
     return [
         Segment("hook", 0.0, 5 * EPIC_BAR, shots=hook_shots, beats=[i * EPIC_BEAT for i in range(20)],
-                beat_zoom=0.045, flashes=[i * EPIC_BAR for i in range(5)], game_gain=0.3, music_gain=1.0,
+                beat_zoom=0.045, flashes=[i * EPIC_BAR for i in range(5)], game_gain=0.3, music_gain=0.75,
                 music_offset=EPIC_CHORUS),
         Segment("title", 5 * EPIC_BAR, 15.0 - 5 * EPIC_BAR, src=orbit_src + 1.5, game_gain=0.0, music_gain=0.55,
                 music_offset=EPIC_VERSE),
@@ -475,8 +476,9 @@ def plan(log, takes):
                 beats=beats(flight_loop, BASS_BEAT, flight_src, 10.0), beat_zoom=0.012),
         Segment("card", 34.6, 1.6, src=hits_src, number="02", title="УДАР", game_gain=0.0),
         # Танк стоит поодаль — обе версии чуть приближены к нему.
+        # В 1.2.1 стук звучал у моба и издалека почти пропадал — здесь он как вблизи, чтобы было с чем сравнить.
         Segment("clip", 36.2, 7.0, src=hits_src, track="before", grade="old", badge=old + ("тук-тук",),
-                base_zoom=1.35, zoom_at=HITS_FOCUS),
+                base_zoom=1.35, zoom_at=HITS_FOCUS, track_gain=2.0),
         Segment("clip", 43.2, 10.0, src=hits_src, badge=new + ("8 гитарных ударов",), glitch_in=True,
                 base_zoom=1.35, zoom_at=HITS_FOCUS,
                 hits=local(strikes_hits, hits_src, 10.0), hit_zoom=0.05, hit_shake=8.0,
@@ -554,7 +556,7 @@ class Montage:
         rng = np.random.default_rng(7)
         for segment in self.segments:
             a = int(segment.start * SR)
-            piece = self.game_audio(segment) * segment.game_gain
+            piece = self.game_audio(segment) * segment.game_gain * segment.track_gain
             game[a:a + len(piece)] += piece
             if segment.music_gain:
                 length = int(segment.length * SR)
@@ -703,8 +705,8 @@ class Montage:
             # Врубается пауэр-метал: вспышка, рывок камеры и надпись во весь экран.
             frame = flash(frame, 0.8 * envelope([drop], t, 0.12))
             if drop <= t < drop + 2.2:
-                metal = self.sprite("metal", lambda: text_sprite("ПАУЭР-МЕТАЛ!", 150, colors=FIRE, stroke=9, shadow=7))
-                scale, alpha = slam(t, drop, 0.3, 2.4)
+                metal = self.sprite("metal", lambda: text_sprite("ПАУЭР-МЕТАЛ!", 118, colors=FIRE, stroke=8, shadow=6))
+                scale, alpha = slam(t, drop, 0.3, 1.9)
                 wobble = 8 * math.exp(-(t - drop) / 0.25) * math.sin((t - drop) * 80)
                 blend(frame, metal, W / 2 + wobble, H / 2 - 60, scale, alpha * min(1.0, (drop + 2.2 - t) / 0.25))
         old = segment.grade == "old"
