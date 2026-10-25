@@ -69,7 +69,7 @@
 - За ней тянется светящаяся радужная лента длиной около секунды полёта: сужается к концу, гаснет, и цвета бегут вдоль неё. Позади ленты ещё немного висят разноцветные блёстки.
 - Над текущей целью кружатся две красные искры, так что видно, за кем стрела гонится.
 - Запуск, удар и падение сопровождаются вспышкой разноцветных искр, победа над мобом — фейерверком и звонким «дзынь», а добыча летит к владельцу по радужной дорожке искр.
-- В полёте стрела тихо свистит; на скорости свист громче и выше.
+- В полёте стрела играет на флейте спокойную мелодию — это живые записи флейты; на скорости она звучит громче, а когда кружит рядом — тише.
 
 ## Управление
 
@@ -98,8 +98,8 @@
 
 1. Установите [Fabric Loader](https://fabricmc.net/use/) 0.16+ для Minecraft 1.21.1.
 2. Скачайте [Fabric API](https://modrinth.com/mod/fabric-api/versions?g=1.21.1) для 1.21.1.
-3. Скачайте `andryushka-arrow-1.2.0.jar` со страницы [Releases](https://github.com/Dobrelya22/-/releases) этого репозитория.
-4. Положите `fabric-api-….jar` и `andryushka-arrow-1.2.0.jar` в папку `.minecraft/mods`.
+3. Скачайте `andryushka-arrow-1.2.1.jar` со страницы [Releases](https://github.com/Dobrelya22/-/releases) этого репозитория.
+4. Положите `fabric-api-….jar` и `andryushka-arrow-1.2.1.jar` в папку `.minecraft/mods`.
 5. Запустите игру с профилем Fabric и создайте или откройте мир.
 
 Для одиночной игры больше ничего не нужно: встроенный сервер одиночного мира работает из того же jar. Для игры на чужом сервере мод должен стоять и на нём.
@@ -109,7 +109,7 @@
 Нужен JDK 21.
 
 ```bash
-./gradlew build        # мод появится в build/libs/andryushka-arrow-1.2.0.jar
+./gradlew build        # мод появится в build/libs/andryushka-arrow-1.2.1.jar
 ./gradlew runClient    # запустить игру с модом
 ./gradlew runGametest  # игровые тесты на сервере
 ```
@@ -129,7 +129,7 @@
 - `entity/AndryushkaArrowEntity.java` — момент колокольчика, скорость, поворотливость, радиусы кружения;
 - `entity/TargetRules.java` — что считать толпой и насколько разгоняться.
 
-Текстуры (иконка предмета, модель, свечение, лента следа), иконку мода и звуки (свист, ответ стрелы, взлёт, свист в полёте) генерирует `tools/generate_assets.py`; для него нужны Pillow, numpy и ffmpeg с libvorbis.
+Текстуры (иконка предмета, модель, свечение, лента следа), иконку мода и звуки свиста, ответа стрелы и взлёта генерирует `tools/generate_assets.py`; для него нужны Pillow, numpy и ffmpeg с libvorbis. Звук полёта — мелодию флейты — собирает `tools/flute_flight.py` из записей флейты VSCO 2: Community Edition (как их скачать — в начале скрипта).
 
 ## Устройство
 
@@ -149,7 +149,11 @@ src/client/java/com/andryushka/arrow/client/
   ArrowKeyBindings.java              — клавиши
   ArrowHud.java                      — надпись и полоска времени над здоровьем
   AndryushkaArrowRenderer.java       — модель, свечение и лента следа
-  ArrowFlightSound.java              — свист стрелы в полёте
+  ArrowFlightSound.java              — флейта стрелы в полёте
 src/gametest/                        — игровые тесты
 src/demo/                            — сценарий демо-ролика
 ```
+
+## Благодарности
+
+Звук полёта собран из записей флейты [VSCO 2: Community Edition](https://github.com/sgossner/VSCO-2-CE) — Versilian Studios (Sam Gossner), лицензия CC0.

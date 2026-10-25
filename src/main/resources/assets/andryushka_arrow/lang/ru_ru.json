@@ -32,7 +32,7 @@
   "message.andryushka_arrow.mode_set": "Режим стрелы: %s",
   "message.andryushka_arrow.returned": "Стрела вернулась · побед: %s",
   "message.andryushka_arrow.landed": "Время вышло, стрела упала рядом · побед: %s",
-  "subtitles.andryushka_arrow.flight": "Свист стрелы",
+  "subtitles.andryushka_arrow.flight": "Стрела играет на флейте",
   "gamerule.category.andryushka_arrow": "Стрела Андрюшки",
   "gamerule.andryushkaArrowDuration": "Время полёта стрелы (секунды)",
   "gamerule.andryushkaArrowDuration.description": "Сколько секунд Стрела Андрюшки охотится, прежде чем закружить вокруг владельца и упасть.",

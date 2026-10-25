@@ -32,7 +32,7 @@
   "message.andryushka_arrow.mode_set": "Arrow mode: %s",
   "message.andryushka_arrow.returned": "The arrow is back · kills: %s",
   "message.andryushka_arrow.landed": "Time is up, the arrow landed nearby · kills: %s",
-  "subtitles.andryushka_arrow.flight": "Arrow whistles",
+  "subtitles.andryushka_arrow.flight": "Arrow plays the flute",
   "gamerule.category.andryushka_arrow": "Andryushka Arrow",
   "gamerule.andryushkaArrowDuration": "Arrow flight time (seconds)",
   "gamerule.andryushkaArrowDuration.description": "How many seconds the Andryushka Arrow hunts before circling its owner and landing.",
