@@ -13,8 +13,14 @@ public final class ModSounds {
     public static final SoundEvent RESPOND = register("respond");
     /** Взлёт стрелы. */
     public static final SoundEvent LAUNCH = register("launch");
-    /** Свист рассекаемого воздуха, который тянется за стрелой в полёте (зацикленный). */
+    /** Бас-рифф, который тянется за стрелой в полёте (зацикленный). */
     public static final SoundEvent FLIGHT = register("flight");
+    /** Гитарный «лязг» при ударе по мобу. */
+    public static final SoundEvent STRIKE = register("strike");
+    /** Драйвовый рок, пока идёт серия побед (зацикленный, только владельцу). */
+    public static final SoundEvent COMBO_ROCK = register("combo_rock");
+    /** Визг соло-гитары на каждую победу серии. */
+    public static final SoundEvent COMBO_LICK = register("combo_lick");
 
     private ModSounds() {
     }

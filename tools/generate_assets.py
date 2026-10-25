@@ -272,7 +272,7 @@ def main() -> int:
     write_ogg(whistle(), ASSETS / "sounds/whistle.ogg")
     write_ogg(respond(), ASSETS / "sounds/respond.ogg")
     write_ogg(launch(), ASSETS / "sounds/launch.ogg")
-    # Звук полёта — живая флейта, его собирает tools/flute_flight.py.
+    # Рок-звуки — бас полёта, гитарные удары и рок серии — собирает tools/rock_sounds.py.
     print("Ассеты обновлены в", ASSETS)
     return 0
 

@@ -1,0 +1,63 @@
+name: share
+
+# Выкладывает лёгкую версию обзора (540p) из релиза «review» на файлообменники: такая ссылка
+# открывается прямо в браузере и сразу играет — её удобно переслать в ВК или в мессенджер.
+# Пробует несколько сервисов и печатает все ссылки, что получились. Запускается вручную
+# (Actions → share → Run workflow) и сам, когда меняется этот файл. Ссылки — в итогах запуска.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/share.yml
+
+jobs:
+  share:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Выкладываем ролик
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download review --repo "$GITHUB_REPOSITORY" --pattern '*-540p60.mp4' --dir .
+          file=$(ls ./*-540p60.mp4)
+          name=$(basename "$file")
+          ls -l "$file"
+          ua="Mozilla/5.0 (X11; Linux x86_64) andryushka-arrow-share"
+          upload() { curl -sS --connect-timeout 20 --max-time 1500 -A "$ua" "$@" || true; }
+          links=()
+
+          # pixeldrain: страница с плеером, хранит файл, пока его смотрят.
+          reply=$(upload -T "$file" "https://pixeldrain.com/api/file/$name")
+          echo "pixeldrain: $reply"
+          id=$(jq -r '.id // empty' <<<"$reply" 2>/dev/null || true)
+          [ -n "$id" ] && links+=("https://pixeldrain.com/u/$id")
+
+          # gofile: страница с плеером.
+          reply=$(upload -F "file=@$file" https://upload.gofile.io/uploadfile)
+          echo "gofile: $reply"
+          page=$(jq -r '.data.downloadPage // empty' <<<"$reply" 2>/dev/null || true)
+          [ -n "$page" ] && links+=("$page")
+
+          # catbox: прямая ссылка на mp4.
+          reply=$(upload -F reqtype=fileupload -F "fileToUpload=@$file" https://catbox.moe/user/api.php)
+          echo "catbox: $reply"
+          [[ "$reply" == https://* ]] && links+=("$reply")
+
+          # Если ничего не вышло — хотя бы временная ссылка на 3 дня.
+          if [ ${#links[@]} -eq 0 ]; then
+            reply=$(upload -F reqtype=fileupload -F time=72h -F "fileToUpload=@$file" \
+                      https://litterbox.catbox.moe/resources/internals/api.php)
+            echo "litterbox: $reply"
+            [[ "$reply" == https://* ]] && links+=("$reply (3 дня)")
+          fi
+
+          if [ ${#links[@]} -eq 0 ]; then
+            echo "Не удалось выложить ролик ни на один сервис"
+            exit 1
+          fi
+          echo "### Обзор «Стрела Андрюшки»" >> "$GITHUB_STEP_SUMMARY"
+          for link in "${links[@]}"; do
+            echo "Ссылка на ролик: $link"
+            echo "- $link" >> "$GITHUB_STEP_SUMMARY"
+          done
