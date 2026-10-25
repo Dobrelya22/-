@@ -151,7 +151,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
     private PrintWriter soundLog;
     /** После конца сценария журнал не трогаем: повторное открытие стёрло бы его. */
     private boolean soundLogClosed;
-    /** Звуки, которые меняют громкость и высоту на ходу (флейта стрелы в полёте), и их номера в журнале. */
+    /** Звуки, которые меняют громкость и высоту на ходу (бас стрелы в полёте), и их номера в журнале. */
     private final Map<TickableSoundInstance, Integer> loops = new IdentityHashMap<>();
     private int loopCount;
 

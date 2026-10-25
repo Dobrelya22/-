@@ -25,5 +25,26 @@
         "attenuation_distance": 24
       }
     ]
+  },
+  "strike": {
+    "subtitle": "subtitles.andryushka_arrow.strike",
+    "sounds": [
+      "andryushka_arrow:strike1",
+      "andryushka_arrow:strike2",
+      "andryushka_arrow:strike3",
+      "andryushka_arrow:strike4"
+    ]
+  },
+  "combo_rock": {
+    "subtitle": "subtitles.andryushka_arrow.combo_rock",
+    "sounds": [
+      "andryushka_arrow:combo_rock"
+    ]
+  },
+  "combo_lick": {
+    "subtitle": "subtitles.andryushka_arrow.combo_lick",
+    "sounds": [
+      "andryushka_arrow:combo_lick"
+    ]
   }
 }

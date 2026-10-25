@@ -5,13 +5,13 @@ import com.andryushka.arrow.ArrowMode;
 import com.andryushka.arrow.entity.AndryushkaArrowEntity;
 import com.andryushka.arrow.registry.ModComponents;
 import com.andryushka.arrow.registry.ModItems;
+import com.andryushka.arrow.registry.ModSounds;
 import java.util.UUID;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,6 +29,13 @@ public final class ClientArrowState {
     private static int trackedCombo;
     private static int trackedLevel;
     private static long killedAt = LONG_AGO;
+    /** Рок серии играет до этого момента: окно серии после последней победы и ещё немного. */
+    private static final long ROCK_HOLD_MILLIS = AndryushkaArrowEntity.COMBO_WINDOW_TICKS * 50L + 1000L;
+    private static long rockingUntil = LONG_AGO;
+    @Nullable
+    private static ComboRockSound rock;
+    /** Визг гитары на победу серии — по ступеням ми-минорной пентатоники, в лад року: ми, соль, ля, си, ре, ми. */
+    private static final int[] LICK_SEMITONES = {0, 3, 5, 7, 10, 12};
     /** Наибольший уровень среди стрел в инвентаре — для надписи, пока стрела не летит. */
     private static int itemLevel = 1;
     @Nullable
@@ -96,6 +103,16 @@ public final class ClientArrowState {
         return popup;
     }
 
+    /** Идёт серия побед — играет рок. */
+    public static boolean isRocking() {
+        return gameMillis() < rockingUntil;
+    }
+
+    /** Насколько громко сейчас играет рок серии (0–1): бас полёта на это время уходит. */
+    public static float rockLevel() {
+        return rock != null && !rock.isDone() ? rock.level() : 0.0F;
+    }
+
     public static void tick(MinecraftClient client) {
         activeArrow = null;
         hasArrowItem = false;
@@ -153,9 +170,15 @@ public final class ClientArrowState {
                 ? Text.translatable("popup.andryushka_arrow.combo." + combo)
                 : Text.translatable("popup.andryushka_arrow.combo.more", combo);
         popup = new Popup(title, null, false, gameMillis());
-        // С каждой победой серии звон выше.
-        float pitch = Math.min(2.0F, 0.85F + 0.18F * combo);
-        client.getSoundManager().play(PositionedSoundInstance.master(SoundEvents.BLOCK_NOTE_BLOCK_PLING.value(), pitch));
+        // Со второй победы подряд вступает рок, а гитара с каждой победой серии взвизгивает выше.
+        rockingUntil = gameMillis() + ROCK_HOLD_MILLIS;
+        if (rock == null || rock.isDone()) {
+            rock = new ComboRockSound();
+            client.getSoundManager().play(rock);
+        }
+        int semitones = LICK_SEMITONES[Math.min(combo - 2, LICK_SEMITONES.length - 1)];
+        float pitch = (float) Math.pow(2.0, semitones / 12.0);
+        client.getSoundManager().play(PositionedSoundInstance.master(ModSounds.COMBO_LICK, pitch, 0.6F));
     }
 
     public static void reset() {
@@ -164,6 +187,8 @@ public final class ClientArrowState {
         killedAt = LONG_AGO;
         trackedArrowId = -1;
         popup = null;
+        rockingUntil = LONG_AGO;
+        rock = null;
         itemLevel = 1;
         activeArrow = null;
         hasArrowItem = false;

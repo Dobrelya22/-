@@ -97,7 +97,7 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
     /** Сколько последних позиций помнит клиент для ленты следа (≈ 1 секунда; на высоких уровнях дольше). */
     private static final int TRAIL_LENGTH = 20;
     /** Победы, между которыми меньше этого, складываются в серию: «двойная», «тройная»… */
-    private static final int COMBO_WINDOW_TICKS = 2 * 20;
+    public static final int COMBO_WINDOW_TICKS = 2 * 20;
     private static final Vector3f MARKER_COLOR = new Vector3f(1.0F, 0.2F, 0.25F);
     private static final Vec3d[] ESCAPE_DIRECTIONS = createEscapeDirections();
 
@@ -690,8 +690,9 @@ public class AndryushkaArrowEntity extends ProjectileEntity {
         boolean damaged = target.damage(source, damage);
         Vec3d center = target.getBoundingBox().getCenter();
         if (damaged) {
-            world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), SoundEvents.ENTITY_ARROW_HIT,
-                    SoundCategory.PLAYERS, 1.0F, 1.1F + this.random.nextFloat() * 0.3F);
+            // Гитарный «лязг» — один из четырёх аккордов, чуть разной высоты.
+            world.playSound(null, target.getX(), target.getBodyY(0.5), target.getZ(), ModSounds.STRIKE,
+                    SoundCategory.PLAYERS, 0.6F, 0.96F + this.random.nextFloat() * 0.08F);
             world.spawnParticles(ParticleTypes.CRIT, center.x, center.y, center.z, 12, 0.25, 0.25, 0.25, 0.4);
             this.burst(world, to, 2, 0.1);
         }
