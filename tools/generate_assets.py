@@ -239,28 +239,6 @@ def launch() -> np.ndarray:
     return normalize(whoosh * 1.6 + rise, 0.8)
 
 
-def flight() -> np.ndarray:
-    """Свист стрелы в полёте — ровно 2 секунды, зациклен без щелчка.
-
-    Частоты тона, вибрато и пульсации кратны 0,5 Гц, а шум синтезирован через обратное БПФ,
-    поэтому конец сигнала гладко переходит в начало.
-    """
-    seconds = 2
-    n = seconds * RATE
-    t = np.arange(n) / RATE
-    vibrato = 25 * np.sin(2 * np.pi * 4 * t)
-    phase = 2 * np.pi * np.cumsum(1500 + vibrato) / RATE
-    whistle_tone = 0.25 * np.sin(phase) + 0.06 * np.sin(2 * phase)
-    spectrum_freqs = np.fft.rfftfreq(n, 1 / RATE)
-    rng = np.random.default_rng(5)
-    shape = np.exp(-((spectrum_freqs - 3200) / 1400) ** 2)
-    spectrum = shape * np.exp(2j * np.pi * rng.random(spectrum_freqs.size))
-    air = np.fft.irfft(spectrum, n)
-    air = air / np.max(np.abs(air)) * 0.5
-    pulse = 1 + 0.15 * np.sin(2 * np.pi * 2 * t)
-    return normalize((whistle_tone + air) * pulse, 0.6)
-
-
 def normalize(signal: np.ndarray, peak: float) -> np.ndarray:
     return signal / max(1e-9, np.max(np.abs(signal))) * peak
 
@@ -294,7 +272,7 @@ def main() -> int:
     write_ogg(whistle(), ASSETS / "sounds/whistle.ogg")
     write_ogg(respond(), ASSETS / "sounds/respond.ogg")
     write_ogg(launch(), ASSETS / "sounds/launch.ogg")
-    write_ogg(flight(), ASSETS / "sounds/flight.ogg")
+    # Звук полёта — живая флейта, его собирает tools/flute_flight.py.
     print("Ассеты обновлены в", ASSETS)
     return 0
 

@@ -7,7 +7,11 @@ import net.minecraft.client.sound.SoundInstance;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.util.math.MathHelper;
 
-/** Свист стрелы в полёте: следует за ней, громче и выше на скорости, затихает при зависании. */
+/**
+ * Стрела в полёте поёт флейтой (tools/flute_flight.py): звук следует за ней, громче на скорости
+ * и тише, когда она кружит. Высоту почти не трогаем, чтобы мелодия не «плыла»; только в толпе,
+ * разогнавшись, стрела звучит чуть выше.
+ */
 public class ArrowFlightSound extends MovingSoundInstance {
     private final AndryushkaArrowEntity arrow;
     private double lastX;
@@ -42,7 +46,7 @@ public class ArrowFlightSound extends MovingSoundInstance {
         this.x = this.arrow.getX();
         this.y = this.arrow.getY();
         this.z = this.arrow.getZ();
-        this.volume = MathHelper.clamp(0.12F + speed * 0.6F, 0.05F, 0.8F);
-        this.pitch = MathHelper.clamp(0.75F + speed * 0.4F + (this.arrow.getBoost() - 1.0F) * 0.2F, 0.5F, 2.0F);
+        this.volume = MathHelper.clamp(0.18F + speed * 0.45F, 0.12F, 0.6F);
+        this.pitch = 1.0F + (this.arrow.getBoost() - 1.0F) * 0.06F;
     }
 }
