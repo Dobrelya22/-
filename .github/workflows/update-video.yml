@@ -171,7 +171,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install numpy pillow opencv-python-headless
+          pip install numpy scipy pillow opencv-python-headless
           mkdir -p raw dist
           gh release download update --pattern 'raw-*' --dir raw
           python tools/demo/update/montage.py raw narration dist/andryushka-arrow-update-720p60.mp4
