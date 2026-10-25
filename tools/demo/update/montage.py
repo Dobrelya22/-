@@ -794,11 +794,15 @@ def write_wav(path, audio):
 
 
 def loudness(audio):
-    """Громкость на слух (LUFS) без стробирования: K-фильтр из ITU-R BS.1770 для 48 кГц."""
+    """Громкость на слух (LUFS): K-фильтр из ITU-R BS.1770 для 48 кГц, медиана по секундам. Медиана —
+    чтобы сцену мерили её звуки (удары, рок), а не один громкий хвост вроде свиста в конце."""
     shelf = signal.lfilter([1.53512485958697, -2.69169618940638, 1.19839281085285],
                            [1.0, -1.69065929318241, 0.73248077421585], audio, axis=0)
     weighted = signal.lfilter([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621], shelf, axis=0)
-    return -0.691 + 10 * math.log10(float(np.sum(np.mean(weighted ** 2, axis=0))) + 1e-12)
+    blocks = [weighted[i:i + SR] for i in range(0, len(weighted) - SR + 1, SR // 2)] or [weighted]
+    values = [-0.691 + 10 * math.log10(float(np.sum(np.mean(b ** 2, axis=0))) + 1e-12) for b in blocks]
+    loud = [v for v in values if v > -60]
+    return float(np.median(loud)) if loud else -60.0
 
 
 def measure_loudness(path):
