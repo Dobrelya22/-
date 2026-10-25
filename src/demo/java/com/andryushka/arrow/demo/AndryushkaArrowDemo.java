@@ -98,6 +98,13 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
     private static final Path MARKERS = Path.of("demo-markers.txt");
     private static final Path SOUNDS = Path.of("demo-sounds.txt");
     private static final Path DEFAULT_NARRATION = Path.of("../tools/demo/narration.txt");
+    /**
+     * Какой ролик снимаем: review — обзор под закадровый голос, update — дубли для апдейт-ролика
+     * (tools/demo/update-takes.txt), которые потом монтирует tools/demo/update/montage.py.
+     */
+    private static final String SCENARIO = System.getenv().getOrDefault("ANDRYUSHKA_DEMO_SCENARIO", "review");
+    private static final boolean UPDATE_VIDEO = SCENARIO.equals("update");
+    private static final Path UPDATE_TAKES = Path.of("../tools/demo/update-takes.txt");
     private static final int WARMUP_TICKS = 80;
     /** На каком тике разминки замедлять игру: мир уже загружен, но сценарий ещё не начался. */
     private static final int SLOWDOWN_TICK = 40;
@@ -182,7 +189,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
                     }
                 }
             } else {
-                for (String line : Files.readAllLines(DEFAULT_NARRATION, StandardCharsets.UTF_8)) {
+                for (String line : Files.readAllLines(UPDATE_VIDEO ? UPDATE_TAKES : DEFAULT_NARRATION, StandardCharsets.UTF_8)) {
                     String[] parts = line.trim().split("\\s+", 3);
                     if (parts.length >= 2 && !line.startsWith("#")) {
                         this.cues.put(parts[1], Double.parseDouble(parts[0]));
@@ -208,6 +215,21 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
     // ---------------------------------------------------------------- сценарий
 
     private void writeScript() {
+        if (UPDATE_VIDEO) {
+            this.updateTakes();
+        } else {
+            this.review();
+        }
+        Double end = this.cues.get("end");
+        this.endTick = end != null ? (int) Math.round(end * 20.0) : 600 * 20;
+        this.script.add(new Step(this.endTick, client -> {
+            mark("end");
+            this.closeSoundLog();
+            client.scheduleStop();
+        }));
+    }
+
+    private void review() {
         this.intro();
         this.crafting();
         this.targetMode();
@@ -222,13 +244,126 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         this.trails();
         this.advancements();
         this.finale();
-        Double end = this.cues.get("end");
-        this.endTick = end != null ? (int) Math.round(end * 20.0) : 600 * 20;
-        this.script.add(new Step(this.endTick, client -> {
-            mark("end");
-            this.closeSoundLog();
-            client.scheduleStop();
-        }));
+    }
+
+    // ---------------------------------------------------------------- апдейт-ролик
+
+    /**
+     * Дубли для апдейт-ролика «как было — как стало»: без заголовков сцен, надписи добавит монтаж.
+     * Каждый дубль звучит дважды — со звуками 1.3.0 и, через tools/demo/sound_track.py --before,
+     * со звуками 1.2.1, поэтому сравнение идёт на одних и тех же кадрах.
+     */
+    private void updateTakes() {
+        on("setup", -0.5, client -> {
+            mark("start");
+            command(client,
+                    "gamerule doDaylightCycle false",
+                    "gamerule doWeatherCycle false",
+                    "gamerule doMobSpawning false",
+                    "tp @e[type=!minecraft:player] 0 -200 0",
+                    "time set 6000",
+                    "weather clear",
+                    "difficulty easy",
+                    "gamemode survival @a",
+                    "tp @a " + HOVER.x + " " + HOVER.y + " " + HOVER.z + " 0 " + VIEW_PITCH);
+            giveArrow(client, 0, "rainbow");
+            server(client, server -> {
+                ServerPlayerEntity player = player(server);
+                player.getAbilities().allowFlying = true;
+                player.getAbilities().flying = true;
+                player.getAbilities().invulnerable = true;
+                player.sendAbilitiesUpdate();
+            });
+            client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
+            client.inGameHud.getChatHud().clear(false);
+            this.snapCamera(0.0F, VIEW_PITCH);
+        });
+        on("setup", 0.0, client -> command(client, "kill @e[type=minecraft:item]", "kill @e[type=minecraft:experience_orb]"));
+        // «Выбранная цель» → «Все мобы» → «Охрана».
+        on("setup", 1.0, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("setup", 1.6, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+
+        // Полёт: в «Охране» без врагов стрела просто кружит рядом — слышно только её.
+        on("flight", -0.6, AndryushkaArrowDemo::selectArrow);
+        on("flight", 0.0, client -> {
+            this.useArrow(client);
+            this.pan(-25.0F, 25.0F, 14.0);
+        });
+        on("flight", 13.5, client -> press(ArrowKeyBindings.WHISTLE));
+
+        // Удары: хаск-«танк» на 72 здоровья и урон 4 — восемнадцать ударов подряд, без серии.
+        on("hits", -0.3, client -> {
+            clearStage(client);
+            command(client, "gamerule andryushkaArrowDamage 4", summon("husk", 0, 9,
+                    "NoAI:1b,PersistenceRequired:1b,Health:72f,CustomName:'\"Танк\"',CustomNameVisible:1b,"
+                            + "attributes:[{id:\"minecraft:generic.max_health\",base:72.0d}]"));
+            giveArrow(client, 0, "rainbow");
+            this.look(0.0F, VIEW_PITCH);
+        });
+        on("hits", 0.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("hits", 1.0, client -> this.lookAt(client, new Vec3d(0.5, GROUND + 1.0, 9.5)));
+        on("hits", 2.2, AndryushkaArrowDemo::selectArrow);
+        on("hits", 3.0, client -> {
+            this.useArrow(client);
+            this.follow = true;
+        });
+        on("hits", 15.5, client -> press(ArrowKeyBindings.WHISTLE));
+
+        // Серия: двадцать хасков по кругу и стрела V уровня — победы одна за другой.
+        on("streak", -0.3, client -> {
+            clearStage(client);
+            command(client, "gamerule andryushkaArrowDamage 100");
+            giveArrow(client, 150, "rainbow");
+            this.follow = false;
+            this.look(0.0F, VIEW_PITCH);
+            for (int i = 0; i < 20; i++) {
+                double angle = 2 * Math.PI * i / 20;
+                command(client, mob("husk", (int) Math.round(Math.cos(angle) * 9),
+                        9 + (int) Math.round(Math.sin(angle) * 8), ""));
+            }
+        });
+        on("streak", 0.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("streak", 1.5, AndryushkaArrowDemo::selectArrow);
+        on("streak", 2.2, client -> {
+            this.useArrow(client);
+            this.follow = true;
+        });
+        on("streak", 20.0, client -> press(ArrowKeyBindings.WHISTLE));
+
+        // Ещё одна мясорубка — с огненным следом, для заставки.
+        on("fire", -0.3, client -> {
+            clearStage(client);
+            giveArrow(client, 150, "fire");
+            this.follow = false;
+            this.look(0.0F, VIEW_PITCH);
+            for (int i = 0; i < 16; i++) {
+                double angle = 2 * Math.PI * i / 8 + (i >= 8 ? Math.PI / 8 : 0.0);
+                double radius = i >= 8 ? 11.0 : 6.0;
+                command(client, mob("husk", (int) Math.round(Math.cos(angle) * radius),
+                        10 + (int) Math.round(Math.sin(angle) * radius * 0.8), ""));
+            }
+        });
+        on("fire", 1.0, AndryushkaArrowDemo::selectArrow);
+        on("fire", 1.8, client -> {
+            this.useArrow(client);
+            this.follow = true;
+        });
+        on("fire", 19.0, client -> press(ArrowKeyBindings.WHISTLE));
+
+        // Золотой след кружит вокруг игрока под панораму — для концовки.
+        on("orbit", -0.3, client -> {
+            clearStage(client);
+            giveArrow(client, 150, "gold");
+            this.follow = false;
+            this.look(-30.0F, 14.0F);
+        });
+        on("orbit", 0.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
+        on("orbit", 1.0, AndryushkaArrowDemo::selectArrow);
+        on("orbit", 1.6, client -> {
+            this.useArrow(client);
+            this.pan(-30.0F, 30.0F, 15.0);
+        });
+        on("orbit", 16.0, client -> press(ArrowKeyBindings.WHISTLE));
     }
 
     private void intro() {
@@ -736,7 +871,8 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
             }
         }
         // Достижения мода всплывают — это часть обзора; первые секунды чистим остатки от загрузки.
-        if (this.tick < 40) {
+        // В апдейт-ролике всплывашки не нужны совсем: кадры монтируются без них.
+        if (this.tick < 40 || UPDATE_VIDEO) {
             client.getToastManager().clear();
         }
         this.steer(client);

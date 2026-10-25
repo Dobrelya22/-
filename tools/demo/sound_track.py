@@ -6,6 +6,9 @@
 собирает из тех же файлов звуков дорожку в масштабе ролика: с затуханием по расстоянию,
 стереопанорамой относительно камеры и высотой тона, как в игре. Запуск:
     sound_track.py demo-sounds.txt demo-markers.txt ЗАМЕДЛЕНИЕ sfx.wav
+С --before --old-flight flight-1.2.1.ogg та же запись звучит как в версии 1.2.1 — для роликов
+«как было — как стало»: флейта вместо баса, стук стрелы вместо гитары, звон вместо визга гитары
+и без рока серии.
 Нужны numpy и ffmpeg.
 """
 import argparse
@@ -25,6 +28,9 @@ RATE = 48000
 # Насколько разводить звук по каналам: 1 — полностью влево/вправо.
 PAN_WIDTH = 0.6
 MOD_RESOURCES = Path("src/main/resources/assets")
+FLIGHT = "andryushka_arrow:sounds/flight.ogg"
+# Визг гитары в 1.3.0 поднимается по ступеням пентатоники (полутоны от ми) — по ним узнаём номер серии.
+LICK_SEMITONES = [0, 3, 5, 7, 10, 12]
 
 
 def find_assets(explicit):
@@ -49,6 +55,8 @@ class Library:
 
     def path(self, location):
         namespace, path = location.split(":", 1)
+        if namespace == "file":
+            return Path(path)
         if namespace == "minecraft":
             entry = self.index.get(f"minecraft/{path}")
             if entry:
@@ -139,6 +147,36 @@ def render_loop(track, pcm, points):
     track[begin:end, 1] += signal * right
 
 
+def before_sound(location, gain, pitch, old_flight):
+    """Каким был бы этот звук в 1.2.1: (файл, громкость, высота) или None, если его тогда не было."""
+    name = location.rsplit("/", 1)[-1]
+    if location == FLIGHT:
+        return "file:" + str(old_flight), gain, pitch
+    if location.startswith("andryushka_arrow:sounds/strike"):
+        # Был стук попадания стрелы: громкость 1 вместо 0,6 и высота 1,1–1,4 вместо 0,96–1,04.
+        number = name[len("strike"):-len(".ogg")]
+        return f"minecraft:sounds/random/bowhit{number}.ogg", gain / 0.6, 1.1 + (pitch - 0.96) / 0.08 * 0.3
+    if location == "andryushka_arrow:sounds/combo_lick.ogg":
+        # Был звон нотного блока: выше с каждой победой серии, 0,85 + 0,18 × серия.
+        semitones = round(12 * math.log2(pitch))
+        combo = (LICK_SEMITONES.index(semitones) if semitones in LICK_SEMITONES else len(LICK_SEMITONES) - 1) + 2
+        return "minecraft:sounds/note/pling.ogg", gain / 0.6, min(2.0, 0.85 + 0.18 * combo)
+    if location == "andryushka_arrow:sounds/combo_rock.ogg":
+        return None
+    return location, gain, pitch
+
+
+def flight_gain_by_speed(points):
+    """Громкость полёта по скорости стрелы, как в 1.2.1, — без приглушения на время рока серии."""
+    gains = []
+    for i, (t, gain, pitch, pos) in enumerate(points[:-1]):
+        prev = points[i - 1][3] if i else pos
+        speed = math.dist(pos, prev)
+        gains.append((t, min(0.6, max(0.12, 0.18 + speed * 0.45)), pitch, pos))
+    # Последняя точка — остановка звука, её громкость оставляем.
+    return gains + points[-1:]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sounds")
@@ -146,7 +184,11 @@ def main():
     parser.add_argument("dilation", type=float)
     parser.add_argument("out")
     parser.add_argument("--assets", help="папка ресурсов игры (с indexes/ и objects/)")
+    parser.add_argument("--before", action="store_true", help="звуки версии 1.2.1 вместо нынешних")
+    parser.add_argument("--old-flight", type=Path, help="звук полёта 1.2.1 (флейта) — для --before")
     args = parser.parse_args()
+    if args.before and not args.old_flight:
+        parser.error("для --before нужен --old-flight")
 
     marks = dict(line.split() for line in open(args.markers))
     start_ms, end_ms = int(marks["start"]), int(marks["end"])
@@ -169,6 +211,11 @@ def main():
             location, gain, pitch, distance = parts[2], float(parts[3]), float(parts[4]), parts[5]
             pos = tuple(map(float, parts[6:9]))
             loop, relative = int(parts[9]), parts[10] == "rel"
+            if args.before:
+                old = before_sound(location, gain, pitch, args.old_flight.resolve())
+                if old is None:
+                    continue
+                location, gain, pitch = old
             sound = dict(t=t, location=location, gain=gain, pitch=pitch, pos=pos, relative=relative,
                          distance=None if distance == "inf" else float(distance))
             if loop:
@@ -198,6 +245,8 @@ def main():
         if pcm is None:
             missing.add(loop["location"])
             continue
+        if args.before and loop["location"].startswith("file:"):
+            loop["points"] = flight_gain_by_speed(loop["points"])
         points = []
         for t, gain, pitch, pos in loop["points"]:
             left, right = spatial(camera, t, pos, loop["distance"], loop["relative"])
