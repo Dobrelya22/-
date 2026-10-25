@@ -28,7 +28,12 @@ jobs:
           path: build/libs/andryushka-arrow-*.jar
 
       - name: Полная сборка
-        run: ./gradlew build demoClasses --stacktrace
+        run: ./gradlew build --stacktrace
+
+      # Сценарий обзорного ролика собирается отдельным вызовом: его ресурсы лежат рядом с классами,
+      # и в одном вызове с remapJar Gradle ругается на неявную зависимость.
+      - name: Сценарий ролика
+        run: ./gradlew demoClasses --stacktrace
 
       - name: Игровые тесты
         run: ./gradlew runGametest --stacktrace
