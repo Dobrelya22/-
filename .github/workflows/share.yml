@@ -1,0 +1,38 @@
+name: share
+
+# Выкладывает лёгкую версию обзора (540p) из релиза «review» на файлообменник catbox.moe:
+# такая ссылка открывается прямо в браузере и сразу играет — её удобно переслать в ВК или
+# в мессенджер. Запускается вручную (Actions → share → Run workflow) и сам, когда меняется этот
+# файл. Ссылка — в итогах запуска.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/share.yml
+
+jobs:
+  share:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Выкладываем ролик
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download review --repo "$GITHUB_REPOSITORY" --pattern '*-540p60.mp4' --dir .
+          file=$(ls ./*-540p60.mp4)
+          ls -l "$file"
+          url=$(curl -sS --retry 3 --max-time 1200 -F reqtype=fileupload -F "fileToUpload=@$file" \
+                  https://catbox.moe/user/api.php || true)
+          if [[ "$url" != https://* ]]; then
+            echo "catbox не принял файл: $url"
+            url=$(curl -sS --retry 3 --max-time 1200 -A "andryushka-arrow-share" -F "file=@$file" https://0x0.st || true)
+          fi
+          if [[ "$url" != https://* ]]; then
+            echo "Не удалось выложить ролик: $url"
+            exit 1
+          fi
+          # Проверяем, что ссылка отдаёт видео целиком.
+          curl -sSI "$url" | grep -iE '^(HTTP|content-type|content-length)'
+          echo "Ссылка на ролик: $url"
+          echo "### Обзор «Стрела Андрюшки»: $url" >> "$GITHUB_STEP_SUMMARY"
