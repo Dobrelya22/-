@@ -32,19 +32,68 @@
       "andryushka_arrow:strike1",
       "andryushka_arrow:strike2",
       "andryushka_arrow:strike3",
-      "andryushka_arrow:strike4"
+      "andryushka_arrow:strike4",
+      "andryushka_arrow:strike5",
+      "andryushka_arrow:strike6",
+      "andryushka_arrow:strike7",
+      "andryushka_arrow:strike8"
     ]
   },
   "combo_rock": {
     "subtitle": "subtitles.andryushka_arrow.combo_rock",
     "sounds": [
-      "andryushka_arrow:combo_rock"
+      {
+        "name": "andryushka_arrow:combo_rock",
+        "preload": true
+      }
     ]
   },
-  "combo_lick": {
+  "combo_rock_lead": {
+    "subtitle": "subtitles.andryushka_arrow.combo_rock_lead",
+    "sounds": [
+      {
+        "name": "andryushka_arrow:combo_rock_lead",
+        "preload": true
+      }
+    ]
+  },
+  "combo_epic": {
+    "subtitle": "subtitles.andryushka_arrow.combo_epic",
+    "sounds": [
+      {
+        "name": "andryushka_arrow:combo_epic",
+        "preload": true
+      }
+    ]
+  },
+  "combo_end": {
+    "subtitle": "subtitles.andryushka_arrow.combo_end",
+    "sounds": [
+      "andryushka_arrow:combo_end"
+    ]
+  },
+  "combo_lick2": {
     "subtitle": "subtitles.andryushka_arrow.combo_lick",
     "sounds": [
-      "andryushka_arrow:combo_lick"
+      "andryushka_arrow:combo_lick2"
+    ]
+  },
+  "combo_lick3": {
+    "subtitle": "subtitles.andryushka_arrow.combo_lick",
+    "sounds": [
+      "andryushka_arrow:combo_lick3"
+    ]
+  },
+  "combo_lick4": {
+    "subtitle": "subtitles.andryushka_arrow.combo_lick",
+    "sounds": [
+      "andryushka_arrow:combo_lick4"
+    ]
+  },
+  "combo_lick5": {
+    "subtitle": "subtitles.andryushka_arrow.combo_lick",
+    "sounds": [
+      "andryushka_arrow:combo_lick5"
     ]
   }
 }

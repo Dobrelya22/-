@@ -33,10 +33,15 @@ ROOT = HERE.parents[2]
 FONT = HERE / "RussoOne-Regular.ttf"
 LINES = HERE / "narration.txt"
 TAKES = ROOT / "tools/demo/update-takes.txt"
-ROCK_LOOP = ROOT / "src/main/resources/assets/andryushka_arrow/sounds/combo_rock.ogg"
+EPIC = ROOT / "src/main/resources/assets/andryushka_arrow/sounds/combo_epic.ogg"
 # Темп партий (tools/rock_sounds.py): бас полёта — 120 ударов в минуту, рок серии — 150.
 BASS_BEAT = 0.5
 ROCK_BEAT = 0.4
+# Пауэр-метал серии — 180 ударов в минуту; в файле припев начинается с 11-го такта, куплет — с 3-го.
+EPIC_BEAT = 60.0 / 180.0
+EPIC_BAR = 4 * EPIC_BEAT
+EPIC_CHORUS = 10 * EPIC_BAR
+EPIC_VERSE = 2 * EPIC_BAR
 # Где в кадре дубля с ударами стоит танк (камера там неподвижна).
 HITS_FOCUS = (770, 300)
 LOUDNESS = -15.0
@@ -405,19 +410,27 @@ class Segment:
     base_zoom: float = 1.0
     zoom_at: tuple = (W / 2, H / 2)
     music_gain: float = 0.0
+    music_offset: float = 0.0  # откуда в файле пауэр-метала начинается музыка сцены
     shots: list = field(default_factory=list)
+    drops: list = field(default_factory=list)  # момент, когда врубается пауэр-метал
 
 
 def plan(log, takes):
     """Сцены ролика. Секунды в ролике совпадают с narration.txt; места в дублях — по журналу звуков."""
-    flight_launch = first(log.times("launch.ogg", takes["flight"][0] - 1, takes["hits"][0]), takes["flight"][0])
-    flight_loop = first(log.times("sounds/flight.ogg", flight_launch - 0.5, takes["hits"][0]), flight_launch)
-    strikes_hits = log.times("strike", takes["hits"][0], takes["streak"][0])
-    kills_streak = log.times("successful_hit", takes["streak"][0], takes["fire"][0])
-    rock_streak = first(log.times("combo_rock", takes["streak"][0], takes["fire"][0]), kills_streak[1] if len(kills_streak) > 1 else 0)
-    kills_fire = log.times("successful_hit", takes["fire"][0], takes["orbit"][0])
-    rock_fire = first(log.times("combo_rock", takes["fire"][0], takes["orbit"][0]), kills_fire[1] if len(kills_fire) > 1 else 0)
-    orbit_launch = first(log.times("launch.ogg", takes["orbit"][0], takes["end"][0]), takes["orbit"][0] + 1.6)
+    def window(name):
+        names = list(takes)
+        return takes[name][0], takes[names[names.index(name) + 1]][0]
+
+    flight_launch = first(log.times("launch.ogg", window("flight")[0] - 1, window("flight")[1]), takes["flight"][0])
+    flight_loop = first(log.times("sounds/flight.ogg", flight_launch - 0.5, window("flight")[1]), flight_launch)
+    strikes_hits = log.times("strike", *window("hits"))
+    kills_streak = log.times("successful_hit", *window("streak"))
+    rock_streak = first(log.times("combo_rock.ogg", *window("streak")), first(kills_streak, 0.0))
+    epic_streak = first(log.times("combo_epic", *window("streak")), None)
+    kills_fire = log.times("successful_hit", *window("fire"))
+    rock_fire = first(log.times("combo_rock.ogg", *window("fire")), first(kills_fire, 0.0))
+    epic_fire = first(log.times("combo_epic", *window("fire")), None)
+    orbit_launch = first(log.times("launch.ogg", *window("orbit")), takes["orbit"][0] + 1.6)
 
     def beats(origin, step, src, length):
         """Удары в такт внутри [src, src+length) — в секундах сцены."""
@@ -428,22 +441,34 @@ def plan(log, takes):
             k += 1
         return out
 
+    def music_beats(rock, epic, src, length):
+        """Доли рока до пауэр-метала, дальше — доли пауэр-метала."""
+        out = [b for b in beats(rock, ROCK_BEAT, src, length) if epic is None or src + b < epic]
+        return sorted(out + (beats(epic, EPIC_BEAT, src, length) if epic is not None else []))
+
     def local(times, src, length):
         return [t - src for t in times if src <= t < src + length]
+
+    def drop(epic, src):
+        return [epic - src] if epic is not None else []
 
     flight_src = flight_launch + 1.2
     hits_src = first(strikes_hits, takes["hits"][0] + 3.5) - 0.7
     streak_src = first(kills_streak, takes["streak"][0] + 3.0) - 1.0
     fire_src = first(kills_fire, takes["fire"][0] + 3.0) - 0.8
     orbit_src = orbit_launch + 0.3
-    mid = lambda kills, k, fallback: kills[min(len(kills) - 1, k)] if kills else fallback
-    hook_shots = [mid(kills_fire, 0, fire_src) - 0.3, mid(kills_streak, len(kills_streak) // 2, streak_src) - 0.6,
-                  mid(kills_fire, len(kills_fire) // 2, fire_src) - 0.5, mid(kills_streak, len(kills_streak) - 4, streak_src) - 0.4]
-    old, new = ("БЫЛО", "1.2.1"), ("СТАЛО", "1.3.0")
+    # Заставка — пять тактов пауэр-метала: по кадру мясорубки на такт.
+    hot_fire = epic_fire if epic_fire is not None else fire_src + 3
+    hot_streak = epic_streak if epic_streak is not None else streak_src + 3
+    hook_shots = [hot_fire + 0.4, hot_streak + 2.0, hot_fire + 3.2, hot_streak + 6.5, hot_fire + 5.8]
+    old, new = ("БЫЛО", "1.2.1"), ("СТАЛО", "1.4.0")
+    streak_len, fire_len = 25.0, 10.0
     return [
-        Segment("hook", 0.0, 6.4, shots=hook_shots, beats=[i * ROCK_BEAT for i in range(16)], beat_zoom=0.045,
-                flashes=[0.0, 1.6, 3.2, 4.8], game_gain=0.35, music_gain=1.0),
-        Segment("title", 6.4, 8.6, src=orbit_src + 1.5, game_gain=0.0, music_gain=0.55),
+        Segment("hook", 0.0, 5 * EPIC_BAR, shots=hook_shots, beats=[i * EPIC_BEAT for i in range(20)],
+                beat_zoom=0.045, flashes=[i * EPIC_BAR for i in range(5)], game_gain=0.3, music_gain=1.0,
+                music_offset=EPIC_CHORUS),
+        Segment("title", 5 * EPIC_BAR, 15.0 - 5 * EPIC_BAR, src=orbit_src + 1.5, game_gain=0.0, music_gain=0.55,
+                music_offset=EPIC_VERSE),
         Segment("card", 15.0, 1.6, src=flight_src, number="01", title="ПОЛЁТ", game_gain=0.0),
         Segment("clip", 16.6, 8.0, src=flight_src, track="before", grade="old", badge=old + ("флейта",)),
         Segment("clip", 24.6, 10.0, src=flight_src, badge=new + ("сочный бас",), glitch_in=True,
@@ -452,22 +477,23 @@ def plan(log, takes):
         # Танк стоит поодаль — обе версии чуть приближены к нему.
         Segment("clip", 36.2, 7.0, src=hits_src, track="before", grade="old", badge=old + ("тук-тук",),
                 base_zoom=1.35, zoom_at=HITS_FOCUS),
-        Segment("clip", 43.2, 10.0, src=hits_src, badge=new + ("гитарный удар",), glitch_in=True,
+        Segment("clip", 43.2, 10.0, src=hits_src, badge=new + ("8 гитарных ударов",), glitch_in=True,
                 base_zoom=1.35, zoom_at=HITS_FOCUS,
                 hits=local(strikes_hits, hits_src, 10.0), hit_zoom=0.05, hit_shake=8.0,
                 flashes=local(strikes_hits, hits_src, 10.0), flash_alpha=0.1),
         Segment("card", 53.2, 1.6, src=streak_src, number="03", title="СЕРИИ", game_gain=0.0),
         Segment("clip", 54.8, 9.0, src=streak_src, track="before", grade="old", badge=old + ("звон",)),
-        Segment("clip", 63.8, 18.0, src=streak_src, badge=new + ("рок на серии",), glitch_in=True,
-                beats=beats(rock_streak, ROCK_BEAT, streak_src, 18.0), beat_zoom=0.028,
-                hits=local(kills_streak, streak_src, 18.0), hit_zoom=0.02, hit_shake=6.0,
-                flashes=local(kills_streak, streak_src, 18.0)),
-        Segment("clip", 81.8, 10.2, src=fire_src, badge=("БОНУС", "", "огненный след"),
-                beats=beats(rock_fire, ROCK_BEAT, fire_src, 10.2), beat_zoom=0.028,
-                hits=local(kills_fire, fire_src, 10.2), hit_zoom=0.02, hit_shake=6.0,
-                flashes=local(kills_fire, fire_src, 10.2)),
-        # В концовке только рок и голос: бас полёта под роком спорил бы с ним.
-        Segment("outro", 92.0, 16.0, src=orbit_src, game_gain=0.0, music_gain=0.8),
+        Segment("clip", 63.8, streak_len, src=streak_src, badge=new + ("рок и пауэр-метал",), glitch_in=True,
+                beats=music_beats(rock_streak, epic_streak, streak_src, streak_len), beat_zoom=0.028,
+                hits=local(kills_streak, streak_src, streak_len), hit_zoom=0.02, hit_shake=6.0,
+                flashes=local(kills_streak, streak_src, streak_len), drops=drop(epic_streak, streak_src)),
+        Segment("clip", 63.8 + streak_len, fire_len, src=fire_src, badge=("БОНУС", "", "огненный след"),
+                beats=music_beats(rock_fire, epic_fire, fire_src, fire_len), beat_zoom=0.028,
+                hits=local(kills_fire, fire_src, fire_len), hit_zoom=0.02, hit_shake=6.0,
+                flashes=local(kills_fire, fire_src, fire_len)),
+        # В концовке только пауэр-метал и голос: бас полёта под ним спорил бы с ним.
+        Segment("outro", 63.8 + streak_len + fire_len, 16.0, src=orbit_src, game_gain=0.0, music_gain=0.75,
+                music_offset=EPIC_CHORUS, beats=[]),
     ]
 
 
@@ -506,7 +532,7 @@ class Montage:
     def game_audio(self, segment):
         track = self.tracks[segment.track]
         if segment.kind == "hook":
-            return np.concatenate([self.slice(track, shot, 1.6) for shot in segment.shots])
+            return np.concatenate([self.slice(track, shot, EPIC_BAR) for shot in segment.shots])[:int(segment.length * SR)]
         return self.slice(track, segment.src, segment.length)
 
     @staticmethod
@@ -524,7 +550,7 @@ class Montage:
     def sound(self, path):
         n = int(self.total * SR) + SR
         game, music, fx = np.zeros((n, 2)), np.zeros((n, 2)), np.zeros((n, 2))
-        rock = read_audio(ROCK_LOOP)
+        epic = read_audio(EPIC)
         rng = np.random.default_rng(7)
         for segment in self.segments:
             a = int(segment.start * SR)
@@ -532,7 +558,8 @@ class Montage:
             game[a:a + len(piece)] += piece
             if segment.music_gain:
                 length = int(segment.length * SR)
-                bed = np.tile(rock, (length // len(rock) + 1, 1))[:length] * segment.music_gain
+                offset = int(segment.music_offset * SR)
+                bed = np.tile(epic, (length // len(epic) + 2, 1))[offset:offset + length] * segment.music_gain
                 fade_in, fade_out = int(0.02 * SR), int(0.6 * SR)
                 bed[:fade_in] *= np.linspace(0, 1, fade_in)[:, None]
                 if segment.kind != "hook":
@@ -547,8 +574,10 @@ class Montage:
                 place(fx, glitch_sound(rng), segment.start, 0.35)
             elif segment.kind in ("clip", "outro") and segment.badge[:1] != ("БЫЛО",):
                 place(fx, whoosh(rng), segment.start - 0.3, 0.35)
+            for drop in segment.drops:
+                place(fx, impact(), segment.start + drop, 0.8)
         place(fx, impact(), 0.05, 0.6)
-        place(fx, impact(), 6.45, 0.7)
+        place(fx, impact(), 5 * EPIC_BAR + 0.05, 0.7)
         voice = np.zeros((n, 2))
         voice[:min(n, len(self.voice))] = self.voice[:n]
         mix = (game + music * 0.8) * ducking(voice)[:, None] + fx + voice * VOICE_GAIN
@@ -574,12 +603,12 @@ class Montage:
         for index, segment in enumerate(self.segments):
             frames = round((segment.start + segment.length) * FPS) - round(segment.start * FPS)
             equalizer = Equalizer(self.game_audio(segment)) if segment.kind == "clip" else None
-            clips = [Clip(video, shot, 1.6) for shot in segment.shots] if segment.kind == "hook" \
+            clips = [Clip(video, shot, EPIC_BAR) for shot in segment.shots] if segment.kind == "hook" \
                 else [Clip(video, segment.src, segment.length)]
             for n in range(frames):
                 t = n / FPS
                 if segment.kind == "hook":
-                    frame = clips[min(len(clips) - 1, int(t / 1.6))].next()
+                    frame = clips[min(len(clips) - 1, int(t / EPIC_BAR))].next()
                 else:
                     frame = clips[0].next()
                 frame = getattr(self, "frame_" + segment.kind)(segment, frame, t, n, frame_no, equalizer)
@@ -595,7 +624,8 @@ class Montage:
 
     def camera(self, segment, frame, t, n):
         zoom = segment.base_zoom * (1.0 + segment.beat_zoom * envelope(segment.beats, t)
-                                    + segment.hit_zoom * envelope(segment.hits, t, 0.09))
+                                    + segment.hit_zoom * envelope(segment.hits, t, 0.09)
+                                    + 0.12 * envelope(segment.drops, t, 0.3))
         shake = segment.hit_shake * envelope(segment.hits, t, 0.08)
         dx = shake * math.sin(t * 2 * math.pi * 23.0)
         dy = shake * math.cos(t * 2 * math.pi * 19.0)
@@ -604,8 +634,10 @@ class Montage:
     def frame_hook(self, segment, frame, t, n, frame_no, _):
         frame = self.camera(segment, grade(frame, "new", n), t, n)
         frame = flash(frame, 0.75 * envelope(segment.flashes, t, 0.07))
-        texts = [(0.05, 1.5, "АПДЕЙТ", 150, FIRE), (1.65, 3.1, "1.3.0", 170, GOLD),
-                 (3.25, 4.0, "ТЕПЕРЬ", 120, None), (4.0, 6.35, "ЭТО РОК!", 170, FIRE)]
+        bar = EPIC_BAR
+        texts = [(0.05, bar - 0.05, "АПДЕЙТ", 150, FIRE), (bar + 0.03, 2 * bar - 0.05, "1.4.0", 170, GOLD),
+                 (2 * bar + 0.03, 3 * bar - 0.05, "ТЕПЕРЬ", 130, None),
+                 (3 * bar + 0.03, 5 * bar - 0.08, "ЭТО МЕТАЛ!", 160, FIRE)]
         for begin, end, text, size, colors in texts:
             if begin <= t < end:
                 sprite = self.sprite(("hook", text), lambda: text_sprite(text, size, colors=colors, stroke=8, shadow=6))
@@ -620,14 +652,18 @@ class Montage:
         logo = self.sprite("logo", lambda: text_sprite("СТРЕЛА АНДРЮШКИ", 104, colors=FIRE, stroke=8, shadow=7))
         scale, alpha = slam(t, 0.05, 0.32, 2.0)
         blend(frame, logo, W / 2, 210, scale * (1 + 0.01 * math.sin(t * 3)), alpha)
-        tag = self.sprite("tag", lambda: pill_sprite("АПДЕЙТ 1.3.0", 44, (*RED, 255), small="· РОК-ЗВУК"))
+        tag = self.sprite("tag", lambda: pill_sprite("АПДЕЙТ 1.4.0", 44, (*RED, 255), small="· РОК И МЕТАЛ"))
         x = ease_out((t - 0.7) / 0.35)
         blend(frame, tag, W / 2 - (1 - x) * 700, 320, 1.0, x)
-        chips = ["БАС В ПОЛЁТЕ", "ГИТАРНЫЙ УДАР", "РОК НА СЕРИЯХ"]
-        for i, chip in enumerate(chips):
-            sprite = self.sprite(("chip", chip), lambda c=chip: pill_sprite(c, 34, (24, 18, 30, 230), color=(255, 214, 90)))
-            scale, alpha = slam(t, 3.2 + i * 0.7, 0.25, 1.6)
-            blend(frame, sprite, W / 2 + (i - 1) * 380, 440, scale, alpha)
+        chips = ["БАС В ПОЛЁТЕ", "8 ГИТАРНЫХ УДАРОВ", "РОК И МЕТАЛ НА СЕРИЯХ"]
+        sprites = [self.sprite(("chip", c), lambda c=c: pill_sprite(c, 30, (24, 18, 30, 230), color=(255, 214, 90)))
+                   for c in chips]
+        gap = 24
+        x = W / 2 - (sum(s.shape[1] for s in sprites) + gap * (len(sprites) - 1)) / 2
+        for i, sprite in enumerate(sprites):
+            scale, alpha = slam(t, 2.9 + i * 0.7, 0.25, 1.6)
+            blend(frame, sprite, x + sprite.shape[1] / 2, 440, scale, alpha)
+            x += sprite.shape[1] + gap
         versus = self.sprite("versus", lambda: text_sprite("БЫЛО  vs  СТАЛО", 64, stroke=6, shadow=5))
         scale, alpha = slam(t, 5.5, 0.3, 1.8)
         blend(frame, versus, W / 2, 560, scale, alpha)
@@ -663,6 +699,14 @@ class Montage:
             frame = flash(frame, 0.7 * max(0.0, 1 - t / 0.12))
         if not segment.glitch_in and t < 0.15:
             frame = flash(frame, 1 - t / 0.15)
+        for drop in segment.drops:
+            # Врубается пауэр-метал: вспышка, рывок камеры и надпись во весь экран.
+            frame = flash(frame, 0.8 * envelope([drop], t, 0.12))
+            if drop <= t < drop + 2.2:
+                metal = self.sprite("metal", lambda: text_sprite("ПАУЭР-МЕТАЛ!", 150, colors=FIRE, stroke=9, shadow=7))
+                scale, alpha = slam(t, drop, 0.3, 2.4)
+                wobble = 8 * math.exp(-(t - drop) / 0.25) * math.sin((t - drop) * 80)
+                blend(frame, metal, W / 2 + wobble, H / 2 - 60, scale, alpha * min(1.0, (drop + 2.2 - t) / 0.25))
         old = segment.grade == "old"
         word, version, note = segment.badge
         badge = self.sprite(("badge", word, version), lambda: pill_sprite(
@@ -680,8 +724,9 @@ class Montage:
     def frame_outro(self, segment, frame, t, n, frame_no, _):
         frame = flash(grade(frame, "new", n), max(0.0, 1 - t / 0.15))
         timeline_t = segment.start + t
-        checks = [("БАС В ПОЛЁТЕ", 0.6), ("ГИТАРНЫЙ УДАР", 1.6), ("РОК НА СЕРИЯХ", 2.6)]
-        outro_start = next((begin for begin, _, _ in self.captions if abs(begin - 92.4) < 1.5), 92.4)
+        checks = [("БАС В ПОЛЁТЕ", 0.6), ("8 ГИТАРНЫХ УДАРОВ", 1.7), ("РОК И ПАУЭР-МЕТАЛ НА СЕРИЯХ", 2.9)]
+        outro_start = next((begin for begin, _, _ in self.captions if abs(begin - segment.start - 0.4) < 1.5),
+                           segment.start + 0.4)
         for i, (text, delay) in enumerate(checks):
             sprite = self.sprite(("check", text), lambda c=text: check_sprite(c, 40))
             appear = timeline_t - (outro_start + delay)
@@ -693,13 +738,13 @@ class Montage:
         if t >= 12.0:
             x = t - 12.0
             frame = (frame * (1 - 0.7 * ease_out(x / 0.5))).astype(np.uint8)
-            big = self.sprite("download", lambda: text_sprite("КАЧАЙ 1.3.0", 120, colors=FIRE, stroke=8, shadow=6))
+            big = self.sprite("download", lambda: text_sprite("КАЧАЙ 1.4.0", 120, colors=FIRE, stroke=8, shadow=6))
             link = self.sprite("link", lambda: pill_sprite("github.com/Dobrelya22/-", 40, (24, 18, 30, 240),
                                                            small="· Releases", small_color=(255, 214, 90)))
             scale, alpha = slam(x, 0.1, 0.3, 2.0)
             blend(frame, big, W / 2, 270, scale, alpha)
             blend(frame, link, W / 2, 420, 1.0, ease_out((x - 0.5) / 0.3))
-            thanks = self.sprite("thanks", lambda: text_sprite("Даник · Жана · Алексей — рок!", 40, stroke=4, shadow=3))
+            thanks = self.sprite("thanks", lambda: text_sprite("Даник · Жана · Алексей — метал!", 40, stroke=4, shadow=3))
             blend(frame, thanks, W / 2, 520, 1.0, ease_out((x - 0.9) / 0.3))
             frame = flash(frame, 0.7 * envelope([0.1], x, 0.1))
         if t > segment.length - 0.9:

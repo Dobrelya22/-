@@ -310,17 +310,20 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         on("hits", 3.4, client -> this.look(10.0F, VIEW_PITCH));
         on("hits", 15.5, client -> press(ArrowKeyBindings.WHISTLE));
 
-        // Серия: двадцать хасков по кругу и стрела V уровня — победы одна за другой.
+        // Серия: тридцать четыре хаска в два круга и стрела V уровня — победы одна за другой, и серия
+        // успевает дойти до «неудержимой» и пауэр-метала.
         on("streak", -0.3, client -> {
             clearStage(client);
             command(client, "gamerule andryushkaArrowDamage 100");
             giveArrow(client, 150, "rainbow");
             this.follow = false;
             this.look(0.0F, VIEW_PITCH);
-            for (int i = 0; i < 20; i++) {
-                double angle = 2 * Math.PI * i / 20;
-                command(client, mob("husk", (int) Math.round(Math.cos(angle) * 9),
-                        9 + (int) Math.round(Math.sin(angle) * 8), ""));
+            for (int i = 0; i < 34; i++) {
+                boolean outer = i >= 20;
+                double angle = 2 * Math.PI * (outer ? (i - 20) / 14.0 + 0.035 : i / 20.0);
+                double radius = outer ? 12.0 : 8.0;
+                command(client, mob("husk", (int) Math.round(Math.cos(angle) * radius),
+                        10 + (int) Math.round(Math.sin(angle) * radius * 0.85), ""));
             }
         });
         on("streak", 0.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
@@ -329,7 +332,7 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
             this.useArrow(client);
             this.follow = true;
         });
-        on("streak", 20.0, client -> press(ArrowKeyBindings.WHISTLE));
+        on("streak", 28.0, client -> press(ArrowKeyBindings.WHISTLE));
 
         // Ещё одна мясорубка — с огненным следом, для заставки.
         on("fire", -0.3, client -> {
@@ -1074,7 +1077,8 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
 
     /**
      * Каждый прозвучавший звук: время (мс), файл, громкость с учётом настроек, высота, дальность
-     * слышимости (inf — без затухания), координаты и номер, если звук меняется на ходу.
+     * слышимости (inf — без затухания), координаты, номер, если звук меняется на ходу, относительный
+     * ли он и повторяется ли (rep) или играет один раз (once).
      */
     private void onSoundPlayed(SoundInstance sound, WeightedSoundSet soundSet, float range) {
         Sound chosen = sound.getSound();
@@ -1086,10 +1090,11 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
             loop = ++this.loopCount;
             this.loops.put(tickable, loop);
         }
-        this.log(String.format(Locale.ROOT, "sound %d %s %.4f %.4f %s %.3f %.3f %.3f %d %s",
+        this.log(String.format(Locale.ROOT, "sound %d %s %.4f %.4f %s %.3f %.3f %.3f %d %s %s",
                 System.currentTimeMillis(), chosen.getLocation(), gain(sound), pitch(sound),
                 Float.isInfinite(range) ? "inf" : String.format(Locale.ROOT, "%.2f", range),
-                sound.getX(), sound.getY(), sound.getZ(), loop, sound.isRelative() ? "rel" : "abs"));
+                sound.getX(), sound.getY(), sound.getZ(), loop, sound.isRelative() ? "rel" : "abs",
+                sound.isRepeatable() ? "rep" : "once"));
     }
 
     /** Громкость и высота меняющихся звуков и положение слушателя — каждый тик. */

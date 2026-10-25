@@ -7,8 +7,8 @@
 стереопанорамой относительно камеры и высотой тона, как в игре. Запуск:
     sound_track.py demo-sounds.txt demo-markers.txt ЗАМЕДЛЕНИЕ sfx.wav
 С --before --old-flight flight-1.2.1.ogg та же запись звучит как в версии 1.2.1 — для роликов
-«как было — как стало»: флейта вместо баса, стук стрелы вместо гитары, звон вместо визга гитары
-и без рока серии.
+«как было — как стало»: флейта вместо баса, стук стрелы вместо гитары, звон вместо гитарных фраз
+и без музыки серии.
 Нужны numpy и ffmpeg.
 """
 import argparse
@@ -29,8 +29,8 @@ RATE = 48000
 PAN_WIDTH = 0.6
 MOD_RESOURCES = Path("src/main/resources/assets")
 FLIGHT = "andryushka_arrow:sounds/flight.ogg"
-# Визг гитары в 1.3.0 поднимается по ступеням пентатоники (полутоны от ми) — по ним узнаём номер серии.
-LICK_SEMITONES = [0, 3, 5, 7, 10, 12]
+# Музыка серии появилась после 1.2.1 — в «как было» её нет.
+NEW_MUSIC = ("combo_rock", "combo_epic", "combo_end")
 
 
 def find_assets(explicit):
@@ -122,8 +122,9 @@ def render_one_shot(track, start, pcm, pitch, left, right):
     track[lo:hi, 1] += piece * right
 
 
-def render_loop(track, pcm, points):
-    """Повторяющийся звук, громкость и высота которого менялись каждый тик: points = [(t, left, right, pitch)]."""
+def render_loop(track, pcm, points, once=False):
+    """Звук, громкость и высота которого менялись каждый тик: points = [(t, left, right, pitch)].
+    once — играет один раз и не повторяется, даже если остановили позже, чем он кончился."""
     if len(points) < 2:
         return
     times = np.array([p[0] for p in points])
@@ -135,8 +136,13 @@ def render_loop(track, pcm, points):
     pitch = np.interp(sample_times, times, [p[3] for p in points])
     left = np.interp(sample_times, times, [p[1] for p in points])
     right = np.interp(sample_times, times, [p[2] for p in points])
-    positions = np.cumsum(pitch) % len(pcm)
-    signal = np.interp(positions, np.arange(len(pcm)), pcm, period=len(pcm))
+    positions = np.cumsum(pitch)
+    if once:
+        keep = int(np.searchsorted(positions, len(pcm) - 1))
+        positions, left, right, end = positions[:keep], left[:keep], right[:keep], begin + keep
+        if keep < 2:
+            return
+    signal = np.interp(positions % len(pcm), np.arange(len(pcm)), pcm, period=len(pcm))
     # Короткие нарастание и затухание по краям, чтобы не щёлкало.
     fade = min(len(signal) // 2, int(0.03 * RATE))
     if fade > 0:
@@ -153,17 +159,30 @@ def before_sound(location, gain, pitch, old_flight):
     if location == FLIGHT:
         return "file:" + str(old_flight), gain, pitch
     if location.startswith("andryushka_arrow:sounds/strike"):
-        # Был стук попадания стрелы: громкость 1 вместо 0,6 и высота 1,1–1,4 вместо 0,96–1,04.
-        number = name[len("strike"):-len(".ogg")]
-        return f"minecraft:sounds/random/bowhit{number}.ogg", gain / 0.6, 1.1 + (pitch - 0.96) / 0.08 * 0.3
-    if location == "andryushka_arrow:sounds/combo_lick.ogg":
+        # Был стук попадания стрелы с высотой 1,1–1,4. Тогда он звучал у моба, а гитара теперь звучит
+        # у владельца (громкость 0,55): берём половину громкости — примерно столько оставалось на
+        # обычном расстоянии до цели.
+        number = (int(name[len("strike"):-len(".ogg")]) - 1) % 4 + 1
+        return f"minecraft:sounds/random/bowhit{number}.ogg", gain / 0.55 * 0.5, 1.1 + (pitch - 0.97) / 0.06 * 0.3
+    if location.startswith("andryushka_arrow:sounds/combo_lick"):
         # Был звон нотного блока: выше с каждой победой серии, 0,85 + 0,18 × серия.
-        semitones = round(12 * math.log2(pitch))
-        combo = (LICK_SEMITONES.index(semitones) if semitones in LICK_SEMITONES else len(LICK_SEMITONES) - 1) + 2
+        combo = int(name[len("combo_lick"):-len(".ogg")])
         return "minecraft:sounds/note/pling.ogg", gain / 0.6, min(2.0, 0.85 + 0.18 * combo)
-    if location == "andryushka_arrow:sounds/combo_rock.ogg":
+    if any(music in location for music in NEW_MUSIC):
         return None
     return location, gain, pitch
+
+
+def old_streak_chimes(epic_spans, kills):
+    """В 1.2.1 звон был на каждой победе серии, а теперь с шестой победы вместо фраз играет
+    пауэр-метал. Возвращаем звон на эти победы: на шестой 0,85 + 0,18 × 6, дальше — потолок 2."""
+    chimes = []
+    for begin, end in epic_spans:
+        for i, t in enumerate(k for k in kills if begin - 0.05 <= k < (end if end is not None else 1e9)):
+            chimes.append(dict(t=t, location="minecraft:sounds/note/pling.ogg", gain=1.0,
+                               pitch=min(2.0, 0.85 + 0.18 * (6 + i)), pos=(0.0, 0.0, 0.0), relative=True,
+                               distance=None, once=True))
+    return chimes
 
 
 def flight_gain_by_speed(points):
@@ -200,6 +219,8 @@ def main():
     camera = Camera()
     shots = []
     loops = {}
+    # Для «как было»: где шёл пауэр-метал серии и когда были победы.
+    epic_spans, kills = [], []
     for line in open(args.sounds, encoding="utf-8"):
         parts = line.split()
         if not parts:
@@ -211,13 +232,20 @@ def main():
             location, gain, pitch, distance = parts[2], float(parts[3]), float(parts[4]), parts[5]
             pos = tuple(map(float, parts[6:9]))
             loop, relative = int(parts[9]), parts[10] == "rel"
+            once = len(parts) > 11 and parts[11] == "once"
+            if "combo_epic" in location:
+                epic_spans.append([t, None])
+            elif "combo_end" in location and epic_spans and epic_spans[-1][1] is None:
+                epic_spans[-1][1] = t
+            elif "successful_hit" in location:
+                kills.append(t)
             if args.before:
                 old = before_sound(location, gain, pitch, args.old_flight.resolve())
                 if old is None:
                     continue
                 location, gain, pitch = old
             sound = dict(t=t, location=location, gain=gain, pitch=pitch, pos=pos, relative=relative,
-                         distance=None if distance == "inf" else float(distance))
+                         distance=None if distance == "inf" else float(distance), once=once)
             if loop:
                 loops[loop] = dict(sound, points=[(t, gain, pitch, pos)])
             else:
@@ -227,6 +255,9 @@ def main():
         elif kind == "stop" and int(parts[2]) in loops:
             last = loops[int(parts[2])]["points"][-1]
             loops[int(parts[2])]["points"].append((t, 0.0, last[2], last[3]))
+
+    if args.before:
+        shots += old_streak_chimes(epic_spans, kills)
 
     track = np.zeros((int(video_time(end_ms) * RATE) + RATE, 2), np.float32)
     used = Counter()
@@ -251,7 +282,7 @@ def main():
         for t, gain, pitch, pos in loop["points"]:
             left, right = spatial(camera, t, pos, loop["distance"], loop["relative"])
             points.append((t, left * gain, right * gain, pitch))
-        render_loop(track, pcm, points)
+        render_loop(track, pcm, points, loop["once"])
         used[loop["location"]] += 1
 
     # Мягкое ограничение вместо обрезки пиков, если несколько громких звуков совпали.
