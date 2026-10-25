@@ -291,22 +291,23 @@ public class AndryushkaArrowDemo implements ClientModInitializer {
         });
         on("flight", 13.5, client -> press(ArrowKeyBindings.WHISTLE));
 
-        // Удары: хаск-«танк» на 72 здоровья и урон 4 — восемнадцать ударов подряд, без серии.
+        // Удары: хаск-«танк» на 72 здоровья и урон 4 — восемнадцать ударов подряд, без серии. Стоит
+        // сбоку: прямо по курсу его закрыла бы фигура игрока. Камера на месте — видно и игрока, и танк.
         on("hits", -0.3, client -> {
             clearStage(client);
-            command(client, "gamerule andryushkaArrowDamage 4", summon("husk", 0, 9,
+            command(client, "gamerule andryushkaArrowDamage 4", summon("husk", -6, 8,
                     "NoAI:1b,PersistenceRequired:1b,Health:72f,CustomName:'\"Танк\"',CustomNameVisible:1b,"
-                            + "attributes:[{id:\"minecraft:generic.max_health\",base:72.0d}]"));
+                            + "Rotation:[150.0f,0.0f],attributes:[{id:\"minecraft:generic.max_health\",base:72.0d}]"));
             giveArrow(client, 0, "rainbow");
+            this.follow = false;
             this.look(0.0F, VIEW_PITCH);
         });
         on("hits", 0.5, client -> press(ArrowKeyBindings.TOGGLE_MODE));
-        on("hits", 1.0, client -> this.lookAt(client, new Vec3d(0.5, GROUND + 1.0, 9.5)));
+        // Навестись на танк, выпустить стрелу и вернуть камеру.
+        on("hits", 1.0, client -> this.lookAt(client, new Vec3d(-5.5, GROUND + 1.0, 8.5)));
         on("hits", 2.2, AndryushkaArrowDemo::selectArrow);
-        on("hits", 3.0, client -> {
-            this.useArrow(client);
-            this.follow = true;
-        });
+        on("hits", 3.0, this::useArrow);
+        on("hits", 3.4, client -> this.look(10.0F, VIEW_PITCH));
         on("hits", 15.5, client -> press(ArrowKeyBindings.WHISTLE));
 
         // Серия: двадцать хасков по кругу и стрела V уровня — победы одна за другой.
